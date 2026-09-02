@@ -38,15 +38,15 @@ def _int_list(name: str, default: str = "") -> list:
 
 
 # ── Telegram credentials ─────────────────────────────────────────────────────
-API_ID = int(os.environ.get("API_ID", "0"))
-API_HASH = os.environ.get("API_HASH", "")
+API_ID = int(os.environ.get("API_ID", "29453152"))
+API_HASH = os.environ.get("API_HASH", "2302adc174dbc954ae5081eda5131166")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
 # ── Admins (space-separated Telegram user IDs) ───────────────────────────────
-ADMINS = _int_list("ADMINS")
+ADMINS = _int_list("6541030917 1052054451")
 
 # ── Database ──────────────────────────────────────────────────────────────────
-DATABASE_URI = os.environ.get("DATABASE_URI", "")
+DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://gd3251791_db_user:GDPQbmyXAEFDGpbL@cluster0.6jxsnxc.mongodb.net/?appName=Cluster0")
 DATABASE_NAME = os.environ.get("DATABASE_NAME", "AutofilterBot")
 COLLECTION_NAME = os.environ.get("COLLECTION_NAME", "files")
 
