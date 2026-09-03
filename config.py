@@ -1,12 +1,3 @@
-"""
-Central configuration. Everything is read from environment variables so the
-bot never needs a code change to deploy — set these in Koyeb's dashboard
-(or a local .env file for testing).
-
-Only variables the bot actually uses are defined here. Keeping this file
-short is deliberate: every extra setting is one more thing that can be
-mis-configured on deploy.
-"""
 import os
 import re
 
@@ -52,7 +43,7 @@ COLLECTION_NAME = os.environ.get("COLLECTION_NAME", "files")
 
 # ── Source channels the bot indexes files from (space-separated IDs) ────────
 # The bot must be an admin/member of every channel listed here.
-CHANNELS = _int_list("CHANNELS")
+CHANNELS = _int_list("-1002407564854")
 
 # ── Search behaviour ──────────────────────────────────────────────────────────
 # Search works in groups always. Private-chat search can be switched off here
@@ -62,7 +53,7 @@ RESULTS_PER_PAGE = int(os.environ.get("RESULTS_PER_PAGE", "8"))
 MIN_QUERY_LEN = int(os.environ.get("MIN_QUERY_LEN", "2"))
 
 # ── Optional: channel the bot logs indexing activity to ─────────────────────
-log_channel = os.environ.get("LOG_CHANNEL", "")
+log_channel = os.environ.get("LOG_CHANNEL", "-1003073036876")
 LOG_CHANNEL = int(log_channel) if log_channel and _id_pattern.match(log_channel) else None
 
 # ── Web server (Koyeb requires the app to bind $PORT) ────────────────────────
