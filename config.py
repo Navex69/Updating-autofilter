@@ -50,7 +50,7 @@ CHANNELS = _int_list("CHANNELS", "-1002407564854")
 # (e.g. to force people into a group) without touching any code.
 ENABLE_PM_SEARCH = _bool("ENABLE_PM_SEARCH", True)
 RESULTS_PER_PAGE = int(os.environ.get("RESULTS_PER_PAGE", "8"))
-MIN_QUERY_LEN = int(os.environ.get("MIN_QUERY_LEN", "2"))
+MIN_QUERY_LEN = int(os.environ.get("MIN_QUERY_LEN", "4"))
 
 # ── Optional: channel the bot logs indexing activity to ─────────────────────
 log_channel = os.environ.get("LOG_CHANNEL", "-1003073036876")
