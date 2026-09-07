@@ -34,7 +34,7 @@ API_HASH = os.environ.get("API_HASH", "2302adc174dbc954ae5081eda5131166")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
 # ── Admins (space-separated Telegram user IDs) ───────────────────────────────
-ADMINS = _int_list("6541030917 1052054451")
+ADMINS = _int_list("ADMINS", "6541030917 1052054451")
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://gd3251791_db_user:GDPQbmyXAEFDGpbL@cluster0.6jxsnxc.mongodb.net/?appName=Cluster0")
@@ -43,7 +43,7 @@ COLLECTION_NAME = os.environ.get("COLLECTION_NAME", "files")
 
 # ── Source channels the bot indexes files from (space-separated IDs) ────────
 # The bot must be an admin/member of every channel listed here.
-CHANNELS = _int_list("-1002407564854")
+CHANNELS = _int_list("CHANNELS", "-1002407564854")
 
 # ── Search behaviour ──────────────────────────────────────────────────────────
 # Search works in groups always. Private-chat search can be switched off here
