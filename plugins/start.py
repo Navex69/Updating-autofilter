@@ -1,35 +1,28 @@
-import logging
-
 from pyrogram import Client, filters
-from pyrogram.errors import RPCError
 
 from config import ADMINS
-from database.filters_db import get_file_by_id, total_files
-from strings import START_TXT, HELP_TXT, FILE_SEND_CAPTION, FILE_NOT_FOUND_TXT
-
-logger = logging.getLogger(__name__)
+from database.filters_db import total_files
+from database.premium_db import get_premium
+from plugins.deliver import deliver_file
+from plugins.verify import handle_notcopy
+from utils import IST
+from strings import (
+    START_TXT, HELP_TXT,
+    MYPLAN_ACTIVE_TXT, MYPLAN_NONE_TXT,
+)
 
 
 @Client.on_message(filters.command("start") & filters.private)
 async def start_cmd(bot, message):
     args = message.text.split(maxsplit=1)
+    payload = args[1] if len(args) > 1 else ""
 
-    # Deep link: t.me/<bot>?start=file_<id>  → tapped from a group search result
-    if len(args) > 1 and args[1].startswith("file_"):
-        object_id = args[1][len("file_"):]
-        doc = await get_file_by_id(object_id)
-        if not doc:
-            await message.reply_text(FILE_NOT_FOUND_TXT)
-            return
-        try:
-            await bot.send_cached_media(
-                chat_id=message.chat.id,
-                file_id=doc["file_id"],
-                caption=FILE_SEND_CAPTION.format(file_name=doc["file_name"]),
-            )
-        except RPCError:
-            logger.exception("Failed to deliver file %s", object_id)
-            await message.reply_text(FILE_NOT_FOUND_TXT)
+    if payload.startswith("file_"):
+        await deliver_file(bot, message.from_user.id, payload[len("file_"):])
+        return
+
+    if payload.startswith("notcopy_"):
+        await handle_notcopy(bot, message, payload[len("notcopy_"):])
         return
 
     await message.reply_text(START_TXT.format(mention=message.from_user.mention))
@@ -44,3 +37,13 @@ async def help_cmd(_, message):
 async def stats_cmd(_, message):
     count = await total_files()
     await message.reply_text(f"📁 <b>Indexed files:</b> <code>{count}</code>")
+
+
+@Client.on_message(filters.command("myplan"))
+async def myplan_cmd(_, message):
+    doc = await get_premium(message.from_user.id)
+    if doc:
+        expiry = doc["expiry_time"].astimezone(IST).strftime("%d %b %Y, %I:%M %p IST")
+        await message.reply_text(MYPLAN_ACTIVE_TXT.format(expiry=expiry))
+    else:
+        await message.reply_text(MYPLAN_NONE_TXT)
