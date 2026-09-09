@@ -1,15 +1,13 @@
 import logging
 import time
-from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import TEXT, ASCENDING
 from pymongo.errors import DuplicateKeyError
-from config import DATABASE_URI, DATABASE_NAME, COLLECTION_NAME
+from config import COLLECTION_NAME
+from database.client import db
 
 logger = logging.getLogger(__name__)
 
-_client = AsyncIOMotorClient(DATABASE_URI)
-_db = _client[DATABASE_NAME]
-files = _db[COLLECTION_NAME]
+files = db[COLLECTION_NAME]
 
 
 async def ensure_indexes():
