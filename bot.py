@@ -5,6 +5,9 @@ from pyrogram import Client
 
 from config import API_ID, API_HASH, BOT_TOKEN, PORT
 from database.filters_db import ensure_indexes
+from database.premium_db import ensure_indexes as ensure_premium_indexes
+from database.verify_db import ensure_indexes as ensure_verify_indexes
+from database.settings_db import get_settings
 from utils import temp
 from web import web_app
 
@@ -30,6 +33,9 @@ class Bot(Client):
 
     async def start(self):
         await ensure_indexes()
+        await ensure_premium_indexes()
+        await ensure_verify_indexes()
+        await get_settings()  # warm the settings cache, create the doc on first boot
         await super().start()
         me = await self.get_me()
         temp.BOT = self
