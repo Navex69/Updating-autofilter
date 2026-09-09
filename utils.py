@@ -1,4 +1,20 @@
+import re
 import time
+from datetime import timezone, timedelta
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def ensure_utc(dt):
+    """Normalize a datetime read back from Mongo to timezone-aware UTC.
+    Belt-and-suspenders alongside the client's tz_aware=True — some
+    drivers/proxies don't honor that flag, and a naive/aware comparison
+    crashes instead of just being wrong, so this is worth the tiny cost."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 class Temp:
@@ -47,3 +63,33 @@ class Throttle:
             self._last = now
             return True
         return False
+
+
+_DURATION_UNITS = {
+    "sec": 1, "second": 1, "seconds": 1,
+    "min": 60, "minute": 60, "minutes": 60,
+    "hour": 3600, "hours": 3600,
+    "day": 86400, "days": 86400,
+    "month": 30 * 86400, "months": 30 * 86400,
+    "year": 365 * 86400, "years": 365 * 86400,
+}
+
+
+def parse_duration(text: str) -> int | None:
+    """"1day" / "2 hours" / "1month" -> seconds. None if unparsable."""
+    m = re.match(r"^\s*(\d+)\s*([a-zA-Z]+)\s*$", text or "")
+    if not m:
+        return None
+    value, unit = int(m.group(1)), m.group(2).lower()
+    multiplier = _DURATION_UNITS.get(unit)
+    if not multiplier or value <= 0:
+        return None
+    return value * multiplier
+
+
+def mask_secret(value: str, keep: int = 4) -> str:
+    if not value:
+        return "—"
+    if len(value) <= keep:
+        return "•" * len(value)
+    return value[:keep] + "•" * (len(value) - keep)
