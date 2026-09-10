@@ -1,14 +1,16 @@
+import asyncio
 import hashlib
 import time
 
 from pyrogram import Client, filters, enums
+from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE, MIN_QUERY_LEN
-from database.filters_db import search_files
+from database.filters_db import search_files, display_name
 from database.settings_db import get_settings
 from utils import temp, human_size
-from strings import NOT_FOUND_TXT, RESULT_HEADER_TXT, SEARCH_EXPIRED_TXT
+from strings import NOT_FOUND_TXT, RESULT_HEADER_TXT, SEARCH_EXPIRED_TXT, QUERY_AUTODELETE_NOTE
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Per-query result cache — one DB round trip per search, pagination is free.
@@ -60,16 +62,18 @@ def _render_page(key: str, query: str, results: list, mode: str, offset: int):
     if mode == "text":
         lines = []
         for doc in page:
-            label = doc["file_name"]
+            label = display_name(doc)
             url = f"https://t.me/{temp.U_NAME}?start=file_{doc['_id']}"
             lines.append(f'📁 <a href="{url}">{label}</a> • {human_size(doc.get("file_size", 0))}')
-        text = header + "\n\n" + "\n".join(lines)
+        # A full blank line between entries — much easier to scan than a
+        # dense list when captions run long.
+        text = header + "\n\n" + "\n\n".join(lines)
         markup = InlineKeyboardMarkup([nav]) if nav else None
         return text, markup
 
     rows = []
     for doc in page:
-        label = f"{doc['file_name']} • {human_size(doc.get('file_size', 0))}"
+        label = f"{display_name(doc)} • {human_size(doc.get('file_size', 0))}"
         if len(label) > 60:
             label = label[:57] + "…"
         rows.append([InlineKeyboardButton(
@@ -91,6 +95,14 @@ def _search_filter(_, __, message):
 search_filter = filters.create(_search_filter)
 
 
+async def _schedule_delete(message, seconds: int):
+    await asyncio.sleep(seconds)
+    try:
+        await message.delete()
+    except RPCError:
+        pass
+
+
 @Client.on_message(search_filter)
 async def handle_search(_, message):
     query = message.text.strip()
@@ -108,12 +120,18 @@ async def handle_search(_, message):
     _cache_put(key, query, results, mode)
 
     text, markup = _render_page(key, query, results, mode, offset=0)
-    await message.reply_text(
+    if settings["query_autodelete_enabled"]:
+        text += QUERY_AUTODELETE_NOTE.format(seconds=settings["query_autodelete_seconds"])
+
+    sent = await message.reply_text(
         text,
         reply_markup=markup,
         quote=True,
         disable_web_page_preview=True,
     )
+
+    if settings["query_autodelete_enabled"]:
+        asyncio.create_task(_schedule_delete(sent, settings["query_autodelete_seconds"]))
 
 
 @Client.on_callback_query(filters.regex(r"^pg#"))
