@@ -9,6 +9,10 @@ logger = logging.getLogger(__name__)
 
 files = db[COLLECTION_NAME]
 
+_RESULT_FIELDS = {
+    "file_name": 1, "caption": 1, "file_size": 1, "file_id": 1, "file_unique_id": 1,
+}
+
 
 async def ensure_indexes():
     """Call once at startup. Safe to call repeatedly — Mongo no-ops if present."""
@@ -18,14 +22,22 @@ async def ensure_indexes():
         name="search_text_idx",
     )
     await files.create_index([("file_unique_id", ASCENDING)], unique=True, name="uniq_file_idx")
+    await files.create_index([("channel_id", ASCENDING)], name="channel_idx")
     logger.info("Database indexes ready.")
+
+
+def display_name(doc: dict) -> str:
+    """Captions carry the readable title/quality/language info admins write
+    by hand; prefer that everywhere a file is shown, falling back to the
+    raw filename only when there's no caption."""
+    return (doc.get("caption") or "").strip() or doc.get("file_name", "Unnamed file")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # INDEXING (auto + manual share this single entrypoint)
 # ══════════════════════════════════════════════════════════════════════════════
 
-async def save_file(media) -> str:
+async def save_file(media, channel_id: int | None = None) -> str:
     """
     Save one media item. `media` is a pyrogram Document/Video object with
     `.caption` and `.file_type` attached by the caller.
@@ -49,6 +61,7 @@ async def save_file(media) -> str:
         "caption": getattr(media, "caption", "") or "",
         "file_type": getattr(media, "file_type", "document"),
         "mime_type": getattr(media, "mime_type", "") or "",
+        "channel_id": channel_id,
         "indexed_at": time.time(),
     }
 
@@ -75,6 +88,10 @@ async def total_files() -> int:
     return await files.estimated_document_count()
 
 
+async def count_by_channel(channel_id: int) -> int:
+    return await files.count_documents({"channel_id": channel_id})
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SEARCH
 # ══════════════════════════════════════════════════════════════════════════════
@@ -95,7 +112,7 @@ async def search_files(query: str) -> list:
     cursor = (
         files.find(
             {"$text": {"$search": query}},
-            {"score": {"$meta": "textScore"}, "file_name": 1, "file_size": 1, "file_id": 1, "file_unique_id": 1},
+            {**_RESULT_FIELDS, "score": {"$meta": "textScore"}},
         )
         .sort([("score", {"$meta": "textScore"})])
         .limit(_MAX_FETCH)
@@ -111,10 +128,7 @@ async def search_files(query: str) -> list:
         pattern = re.compile(re.escape(query).replace(r"\ ", r".*"), re.IGNORECASE)
     except re.error:
         return []
-    cursor = files.find(
-        {"file_name": pattern},
-        {"file_name": 1, "file_size": 1, "file_id": 1, "file_unique_id": 1},
-    ).limit(_MAX_FETCH)
+    cursor = files.find({"file_name": pattern}, _RESULT_FIELDS).limit(_MAX_FETCH)
     return await cursor.to_list(length=_MAX_FETCH)
 
 
