@@ -31,8 +31,14 @@ RESULT_HEADER_TXT = "🔎 Results for <b>{query}</b> — found <b>{total}</b>:"
 SEARCH_EXPIRED_TXT = "⏳ This search has expired. Please search again."
 
 FILE_SEND_CAPTION = "<code>{file_name}</code>"
+FILE_SEND_CAPTION_WITH_LIMIT = "<code>{file_name}</code>\n\n📊 Free file {used}/{limit} for today."
 
 FILE_NOT_FOUND_TXT = "❌ That file is no longer available."
+
+# ── Auto-delete ────────────────────────────────────────────────────────────────
+QUERY_AUTODELETE_NOTE = "\n\n⏳ <i>This message will self-destruct in {seconds}s.</i>"
+FILE_AUTODELETE_NOTICE = "🗑 This file will be deleted in <b>{seconds}</b> seconds to avoid copyright issues. Forward or save it now."
+FILE_AUTODELETE_DONE = "🗑 File deleted."
 
 # ── Force-subscribe ──────────────────────────────────────────────────────────
 FSUB_REQUIRED_TXT = (
@@ -64,7 +70,6 @@ PREMIUM_USAGE_TXT = "Usage: <code>/add_premium user_id 1month</code>\n\nDuration
 
 # ── /settings panel ────────────────────────────────────────────────────────────
 SETTINGS_MAIN_TXT = "⚙️ <b>Bot Settings</b>\n\nTap a name to see its details, or the status button to toggle it."
-SETTINGS_CLOSED_TXT = "Settings closed."
 
 FSUB_MENU_HEADER = "📢 <b>Force-Subscribe Channels</b>\n\nTap a channel to remove it."
 FSUB_MENU_EMPTY = "📢 <b>Force-Subscribe Channels</b>\n\nNo channels added yet."
@@ -92,3 +97,26 @@ SET_VERIFY_TIME_USAGE = "Usage: <code>/set_verify_time gap seconds</code>\n\n<co
 SET_VERIFY_TIME_OK = "✅ Gap {gap} set to <code>{seconds}</code> seconds."
 SET_TUTORIAL_USAGE = "Usage: <code>/set_tutorial tier url</code>"
 SET_TUTORIAL_OK = "✅ Tier {tier} tutorial link saved."
+
+INDEX_MENU_HEADER = "📚 <b>Indexed Channels</b>\n\nTap a channel to remove it from auto-indexing."
+INDEX_MENU_EMPTY = "📚 <b>Indexed Channels</b>\n\nNo channels added yet."
+INDEX_MENU_ROW = "🗑 {title} — {count} files"
+INDEX_ADD_PROMPT = "Forward a message from the channel, or send its @username / -100 ID."
+INDEX_ADD_NOT_CHANNEL = "That's not a channel."
+INDEX_ADD_NOT_ADMIN = "I need to be an admin there so I can reliably receive its posts."
+INDEX_ADD_OK = "✅ Added <b>{title}</b> for auto-indexing."
+INDEX_ADD_FAILED = "Couldn't resolve that channel: <code>{error}</code>"
+INDEX_REMOVED_TXT = "✅ Removed from auto-indexing."
+
+ASK_NUMBER_TIMEOUT = "⌛ Timed out — no changes made."
+ASK_NUMBER_INVALID = "That's not a valid number — no changes made."
+
+ASK_QUERY_DELAY_PROMPT = "Send how many seconds a search-result message should stay before I delete it."
+QUERY_DELAY_SET_TXT = "✅ Search results will now self-delete after <code>{seconds}</code> seconds."
+
+ASK_FILE_DELAY_PROMPT = "Send how many seconds a delivered file should stay before I delete it."
+FILE_DELAY_SET_TXT = "✅ Delivered files will now self-delete after <code>{seconds}</code> seconds."
+
+ASK_FILE_LIMIT_PROMPT = "Send how many free files a non-premium user can get per day (e.g. <code>2</code>)."
+FILE_LIMIT_SET_TXT = "✅ Free daily file limit set to <code>{count}</code>."
+FILE_LIMIT_NEEDS_VERIFY_NOTE = "\n\n⚠️ File limit only takes effect while <b>Verification</b> is also on — it's currently off, so this has no effect yet."
