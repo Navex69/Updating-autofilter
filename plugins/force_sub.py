@@ -2,6 +2,7 @@ import logging
 
 from pyrogram.errors import RPCError, UserNotParticipant
 from pyrogram.types import InlineKeyboardButton
+from pyrogram import enums
 
 from database.settings_db import get_settings
 
@@ -33,11 +34,12 @@ async def missing_channels(bot, user_id: int) -> list:
     return buttons
 
 
-async def can_manage_channel(bot, chat_id: int) -> bool:
-    """True only if the bot can actually enforce force-sub on this channel
-    (i.e. it has invite-link permission there, which requires admin rights)."""
+async def is_bot_admin_in(bot, chat_id: int) -> bool:
+    """True only if the bot itself is an admin/owner of this channel — the
+    minimum needed to reliably receive its posts (indexing) or generate
+    invite links for it (force-sub)."""
     try:
-        await bot.create_chat_invite_link(chat_id)
-        return True
+        member = await bot.get_chat_member(chat_id, bot.me.id)
+        return member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER)
     except RPCError:
         return False
