@@ -6,8 +6,9 @@ from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, MessageNotModified
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import ADMINS, CHANNELS, LOG_CHANNEL
+from config import ADMINS, LOG_CHANNEL
 from database.filters_db import save_file
+from database.settings_db import get_settings, add_index_channel
 from utils import temp, readable_time, Throttle
 
 logger = logging.getLogger(__name__)
@@ -31,15 +32,27 @@ def _extract_media(message):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AUTO-INDEX — fires the moment a file is posted to a source channel
+# AUTO-INDEX — fires the moment a file is posted to a source channel.
+# The channel list is admin-editable at runtime (see /settings -> Index), so
+# membership is checked against the cached settings on every message rather
+# than a filter list frozen at plugin-load time. Since settings are cached
+# in memory, this costs nothing extra per message.
 # ══════════════════════════════════════════════════════════════════════════════
 
-@Client.on_message(filters.chat(CHANNELS) & (filters.document | filters.video))
+async def _is_index_channel(_, __, message) -> bool:
+    settings = await get_settings()
+    return message.chat.id in settings["index_channels"]
+
+
+index_channel_filter = filters.create(_is_index_channel)
+
+
+@Client.on_message(index_channel_filter & (filters.document | filters.video))
 async def auto_index(_, message):
     media = _extract_media(message)
     if not media:
         return
-    status = await save_file(media)
+    status = await save_file(media, channel_id=message.chat.id)
     if status == "error":
         logger.warning("Auto-index failed for message %s in %s", message.id, message.chat.id)
 
@@ -152,7 +165,7 @@ async def _run_index(bot, status_msg, chat_id, last_msg_id, skip):
             if media is None:
                 skipped += 1
             else:
-                status = await save_file(media)
+                status = await save_file(media, channel_id=chat_id)
                 if status == "saved":
                     saved += 1
                 elif status == "updated":
@@ -175,11 +188,16 @@ async def _run_index(bot, status_msg, chat_id, last_msg_id, skip):
                 except (MessageNotModified, Exception):
                     pass
 
+        # A manual backfill means the admin wants this channel tracked —
+        # register it for auto-indexing too, so future posts aren't missed.
+        await add_index_channel(chat_id)
+
         elapsed = readable_time(time.time() - start)
         final_text = (
             f"{'⏹ Stopped' if temp.CANCEL_INDEX else '✅ Done'} in {elapsed}\n"
             f"Saved: <code>{saved}</code>  Updated: <code>{updated}</code>\n"
-            f"Duplicates: <code>{duplicate}</code>  Skipped: <code>{skipped}</code>  Errors: <code>{errors}</code>"
+            f"Duplicates: <code>{duplicate}</code>  Skipped: <code>{skipped}</code>  Errors: <code>{errors}</code>\n"
+            f"📌 This channel is now set up for auto-indexing too."
         )
         try:
             await status_msg.edit_text(final_text)
