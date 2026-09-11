@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from pymongo import TEXT, ASCENDING
 from pymongo.errors import DuplicateKeyError
@@ -140,3 +141,141 @@ async def get_file_by_id(object_id: str) -> dict | None:
     except InvalidId:
         return None
     return await files.find_one({"_id": oid})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RESULT FILTERING — season / language / year / quality / episode
+# Extracted straight from file_name + caption text, once per search (meta),
+# then re-applied in memory on every filter tap. No extra DB round trips.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_SE_PATTERN = re.compile(r"\bS(\d{1,2})E(\d{1,3})\b", re.IGNORECASE)
+_SEASON_PATTERN = re.compile(r"\bS(\d{1,2})\b|\bSeason\s*(\d{1,2})\b", re.IGNORECASE)
+_EPISODE_PATTERN = re.compile(r"\bE(?:p(?:isode)?)?\s*(\d{1,3})\b", re.IGNORECASE)
+_YEAR_PATTERN = re.compile(r"\b(19[5-9]\d|20[0-3]\d)\b")
+
+_LANGUAGES = [
+    "hindi", "english", "tamil", "telugu", "kannada", "malayalam",
+    "bengali", "punjabi", "marathi", "gujarati", "urdu", "korean",
+    "japanese", "dual audio", "multi audio",
+]
+_LANG_PATTERNS = {lang: re.compile(rf"\b{re.escape(lang)}\b", re.IGNORECASE) for lang in _LANGUAGES}
+
+# (regex, code, label) — first match wins, ordered best quality first
+_QUALITY_RULES = [
+    (re.compile(r"\b(2160p|4k|uhd)\b", re.IGNORECASE), "2160p", "4K / 2160p"),
+    (re.compile(r"\b1080p\b", re.IGNORECASE), "1080p", "1080p"),
+    (re.compile(r"\b720p\b", re.IGNORECASE), "720p", "720p"),
+    (re.compile(r"\b480p\b", re.IGNORECASE), "480p", "480p"),
+    (re.compile(r"\b360p\b", re.IGNORECASE), "360p", "360p"),
+    (re.compile(r"\bblu-?ray|bdrip\b", re.IGNORECASE), "bluray", "BluRay"),
+    (re.compile(r"\bweb-?dl\b", re.IGNORECASE), "webdl", "WEB-DL"),
+    (re.compile(r"\bwebrip\b", re.IGNORECASE), "webrip", "WEBRip"),
+    (re.compile(r"\bhdrip\b", re.IGNORECASE), "hdrip", "HDRip"),
+    (re.compile(r"\bhdtv\b", re.IGNORECASE), "hdtv", "HDTV"),
+    (re.compile(r"\bdvdrip\b", re.IGNORECASE), "dvdrip", "DVDRip"),
+    (re.compile(r"\b(cam|hdts|ts)\b", re.IGNORECASE), "cam", "CAM/TS"),
+]
+
+
+def _doc_text(doc: dict) -> str:
+    return f"{doc.get('file_name', '')} {doc.get('caption', '') or ''}"
+
+
+def _season_of(text: str) -> int:
+    m = _SE_PATTERN.search(text)
+    if m:
+        return int(m.group(1))
+    m = _SEASON_PATTERN.search(text)
+    if m:
+        return int(m.group(1) or m.group(2))
+    return 0
+
+
+def _episode_of(text: str) -> int:
+    m = _SE_PATTERN.search(text)
+    if m:
+        return int(m.group(2))
+    m = _EPISODE_PATTERN.search(text)
+    if m:
+        return int(m.group(1))
+    return 0
+
+
+def _year_of(text: str) -> str:
+    m = _YEAR_PATTERN.search(text)
+    return m.group(0) if m else ""
+
+
+def _languages_of(text: str) -> list:
+    return [lang for lang, pat in _LANG_PATTERNS.items() if pat.search(text)]
+
+
+def _quality_of(text: str) -> tuple:
+    for pat, code, label in _QUALITY_RULES:
+        if pat.search(text):
+            return code, label
+    return "", ""
+
+
+def extract_meta(results: list) -> dict:
+    """One pass over the full (unfiltered) result set. Returns the distinct
+    filter values available, so filter buttons never offer an empty choice."""
+    seasons, episodes, years = set(), set(), set()
+    languages = set()
+    qualities: dict = {}  # code -> label
+
+    for doc in results:
+        text = _doc_text(doc)
+        season = _season_of(text)
+        if season:
+            seasons.add(season)
+        episode = _episode_of(text)
+        if episode:
+            episodes.add(episode)
+        year = _year_of(text)
+        if year:
+            years.add(year)
+        languages.update(_languages_of(text))
+        code, label = _quality_of(text)
+        if code:
+            qualities[code] = label
+
+    quality_order = [code for _pat, code, _label in _QUALITY_RULES]
+    ordered_qualities = [(c, qualities[c]) for c in quality_order if c in qualities]
+
+    return {
+        "seasons": sorted(seasons),
+        "episodes": sorted(episodes),
+        "years": sorted(years, reverse=True),
+        "languages": sorted(languages),
+        "qualities": ordered_qualities,
+    }
+
+
+def apply_filters(results: list, filters: dict) -> list:
+    """AND-combine every active filter over the full result set."""
+    if not filters:
+        return results
+
+    season = filters.get("season")
+    episode = filters.get("episode")
+    year = filters.get("year")
+    quality = filters.get("quality")
+    language = filters.get("language")
+
+    out = []
+    for doc in results:
+        text = _doc_text(doc)
+        if season and _season_of(text) != int(season):
+            continue
+        if episode and _episode_of(text) != int(episode):
+            continue
+        if year and _year_of(text) != str(year):
+            continue
+        if quality and _quality_of(text)[0] != quality:
+            continue
+        if language and not _LANG_PATTERNS[language].search(text):
+            continue
+        out.append(doc)
+    return out
