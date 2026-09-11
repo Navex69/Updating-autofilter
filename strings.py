@@ -30,6 +30,19 @@ RESULT_HEADER_TXT = "🔎 Results for <b>{query}</b> — found <b>{total}</b>:"
 
 SEARCH_EXPIRED_TXT = "⏳ This search has expired. Please search again."
 
+# ── Result-page filters (season / language / episode / year / quality) ──────
+FILTER_LABELS = {
+    "season": "📅 Season",
+    "language": "🌐 Language",
+    "episode": "▶️ Episode",
+    "year": "📆 Year",
+    "quality": "🎞 Quality",
+}
+FILTER_MENU_TXT = "Choose a {label}:"
+FILTER_CLEAR_BTN = "♻️ Any"
+HOME_BTN = "🏠 Back to Home"
+NO_MATCH_TXT = "😕 No files match the filters you picked."
+
 FILE_SEND_CAPTION = "<code>{file_name}</code>"
 FILE_SEND_CAPTION_WITH_LIMIT = "<code>{file_name}</code>\n\n📊 Free file {used}/{limit} for today."
 
