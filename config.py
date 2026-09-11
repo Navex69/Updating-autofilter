@@ -50,13 +50,13 @@ CHANNELS = _int_list("CHANNELS", "-1002407564854")
 # (e.g. to force people into a group) without touching any code.
 ENABLE_PM_SEARCH = _bool("ENABLE_PM_SEARCH", True)
 RESULTS_PER_PAGE = int(os.environ.get("RESULTS_PER_PAGE", "8"))
-MIN_QUERY_LEN = int(os.environ.get("MIN_QUERY_LEN", "4"))
+MIN_QUERY_LEN = int(os.environ.get("MIN_QUERY_LEN", "1"))
 
 # ── Automatic poster fetch (TMDB primary, OMDb fallback) ───────────────────
 # Both optional — leave unset to disable poster fetching entirely. Get a free
 # key at https://www.themoviedb.org/settings/api and https://www.omdbapi.com/
-TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
-OMDB_API_KEY = os.environ.get("OMDB_API_KEY", "")
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "e166a67b9b21ee3bd84bc189d567057b")
+OMDB_API_KEY = os.environ.get("OMDB_API_KEY", "436aac9c")
 POSTER_FETCH_TIMEOUT = int(os.environ.get("POSTER_FETCH_TIMEOUT", "6"))
 
 # ── Optional: channel the bot logs indexing activity to ─────────────────────
