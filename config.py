@@ -52,6 +52,13 @@ ENABLE_PM_SEARCH = _bool("ENABLE_PM_SEARCH", True)
 RESULTS_PER_PAGE = int(os.environ.get("RESULTS_PER_PAGE", "8"))
 MIN_QUERY_LEN = int(os.environ.get("MIN_QUERY_LEN", "4"))
 
+# ── Automatic poster fetch (TMDB primary, OMDb fallback) ───────────────────
+# Both optional — leave unset to disable poster fetching entirely. Get a free
+# key at https://www.themoviedb.org/settings/api and https://www.omdbapi.com/
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
+OMDB_API_KEY = os.environ.get("OMDB_API_KEY", "")
+POSTER_FETCH_TIMEOUT = int(os.environ.get("POSTER_FETCH_TIMEOUT", "6"))
+
 # ── Optional: channel the bot logs indexing activity to ─────────────────────
 log_channel = os.environ.get("LOG_CHANNEL", "-1003073036876")
 LOG_CHANNEL = int(log_channel) if log_channel and _id_pattern.match(log_channel) else None
