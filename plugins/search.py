@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import html
 import math
+import re
 import time
 
 from pyrogram import Client, filters, enums
@@ -14,11 +15,34 @@ from database.settings_db import get_settings
 from poster import fetch_poster
 from utils import temp, human_size
 from strings import (
-    NOT_FOUND_TXT, RESULT_HEADER_TXT, SEARCH_EXPIRED_TXT, QUERY_AUTODELETE_NOTE,
-    FILTER_LABELS, FILTER_MENU_TXT, FILTER_CLEAR_BTN, HOME_BTN, NO_MATCH_TXT,
+    NOT_FOUND_TXT, RESULT_HEADER_TXT, POSTER_CAPTION_TXT, SEARCH_EXPIRED_TXT,
+    QUERY_AUTODELETE_NOTE, FILTER_LABELS, FILTER_MENU_TXT, FILTER_CLEAR_BTN,
+    HOME_BTN, NO_MATCH_TXT,
 )
 
-CAPTION_LIMIT = 1024  # Telegram's hard cap for a photo caption
+TEXT_LIMIT = 4096  # Telegram's hard cap for a plain message — defensive only,
+                    # real per-file entries are a few hundred chars at most so
+                    # this is never expected to trigger at the default page size.
+
+# ── caption sanitising ──────────────────────────────────────────────────────
+# Some source channels bake literal HTML tags straight into the caption
+# (e.g. "<b>Movie Name ...</b>") expecting Telegram to render them. That
+# breaks the moment we wrap the same text inside our own <a href="...">
+# link — the leftover/duplicate tags either show up as visible "<b>" text or
+# make the whole entity malformed so Telegram drops the link entirely.
+# Strip any tag-shaped substring first, then escape whatever plain text is
+# left (handles stray "&", "<", ">" that are just part of the file name).
+_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?>")
+
+
+def _strip_tags(text: str) -> str:
+    text = _HTML_TAG_RE.sub(" ", text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def _safe_caption(text: str) -> str:
+    return html.escape(_strip_tags(text))
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Per-query result cache — one DB round trip (+ one poster lookup) per search,
@@ -66,7 +90,7 @@ def _cache_put(key: str, query: str, results: list, mode: str, poster) -> dict:
     return entry
 
 
-def _fit_caption(text: str, limit: int = CAPTION_LIMIT) -> str:
+def _fit_text(text: str, limit: int = TEXT_LIMIT) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "…"
@@ -77,7 +101,10 @@ def _chunk(items: list, size: int) -> list:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Rendering
+# Rendering — always a plain text message (4096-char budget). The poster, when
+# found, is sent once as its own separate photo with a short static caption
+# and is never touched again, so it can never run into a caption-length
+# problem no matter how long the file list gets.
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _filter_rows(key: str, meta: dict, filters: dict, offset: int) -> list:
@@ -143,14 +170,14 @@ def _render(key: str, entry: dict, offset: int):
     if entry["mode"] == "text":
         lines = []
         for doc in page:
-            label = html.escape(display_name(doc))
+            label = _safe_caption(display_name(doc))
             url = f"https://t.me/{temp.U_NAME}?start=file_{doc['_id']}"
             lines.append(f'📁 <a href="{url}">{label}</a> • {human_size(doc.get("file_size", 0))}')
         text = header + "\n\n" + "\n\n".join(lines)
     else:
         text = header
         for doc in page:
-            label = f"{display_name(doc)} • {human_size(doc.get('file_size', 0))}"
+            label = f"{_strip_tags(display_name(doc))} • {human_size(doc.get('file_size', 0))}"
             if len(label) > 60:
                 label = label[:57] + "…"
             rows.append([InlineKeyboardButton(
@@ -161,7 +188,7 @@ def _render(key: str, entry: dict, offset: int):
         rows.append([InlineKeyboardButton(HOME_BTN, callback_data=f"home#{key}")])
     rows.append(_nav_row(key, offset, total))
 
-    return text, InlineKeyboardMarkup(rows)
+    return _fit_text(text), InlineKeyboardMarkup(rows)
 
 
 def _filter_menu(key: str, ftype: str, entry: dict, offset: int):
@@ -191,19 +218,15 @@ def _filter_menu(key: str, ftype: str, entry: dict, offset: int):
     return text, InlineKeyboardMarkup(rows)
 
 
-async def _push(message, text: str, markup, entry: dict):
-    """Edit an existing result message, matching its original send type."""
-    if entry["poster"]:
-        await message.edit_caption(_fit_caption(text), reply_markup=markup)
-    else:
-        await message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+async def _push(message, text: str, markup):
+    """The results message is always plain text — editing is always edit_text.
+    The poster (when present) is a separate, static message and never carries
+    the keyboard, so a callback can never originate from it."""
+    await message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
 
 
 async def _expired(message):
-    if message.photo:
-        await message.edit_caption(SEARCH_EXPIRED_TXT)
-    else:
-        await message.edit_text(SEARCH_EXPIRED_TXT)
+    await message.edit_text(SEARCH_EXPIRED_TXT)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -254,23 +277,28 @@ async def handle_search(_, message):
     if settings["query_autodelete_enabled"]:
         text += QUERY_AUTODELETE_NOTE.format(seconds=settings["query_autodelete_seconds"])
 
+    to_delete = []
+
+    # The poster is a short, static, always-safe caption — it never carries
+    # the growing file list, so it can never hit Telegram's 1024-char photo
+    # caption limit no matter how long/many the results are.
     if poster:
-        sent = await message.reply_photo(
+        poster_msg = await message.reply_photo(
             poster["url"],
-            caption=_fit_caption(text),
-            reply_markup=markup,
+            caption=POSTER_CAPTION_TXT.format(query=html.escape(query)),
             quote=True,
         )
+        to_delete.append(poster_msg)
+        sent = await message.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
     else:
         sent = await message.reply_text(
-            text,
-            reply_markup=markup,
-            quote=True,
-            disable_web_page_preview=True,
+            text, reply_markup=markup, quote=True, disable_web_page_preview=True,
         )
+    to_delete.append(sent)
 
     if settings["query_autodelete_enabled"]:
-        asyncio.create_task(_schedule_delete(sent, settings["query_autodelete_seconds"]))
+        for m in to_delete:
+            asyncio.create_task(_schedule_delete(m, settings["query_autodelete_seconds"]))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -291,7 +319,7 @@ async def paginate(_, query):
         await _expired(query.message)
         return
     text, markup = _render(key, entry, int(offset))
-    await _push(query.message, text, markup, entry)
+    await _push(query.message, text, markup)
 
 
 @Client.on_callback_query(filters.regex(r"^fm#"))
@@ -303,7 +331,7 @@ async def open_filter_menu(_, query):
         await _expired(query.message)
         return
     text, markup = _filter_menu(key, ftype, entry, int(offset))
-    await _push(query.message, text, markup, entry)
+    await _push(query.message, text, markup)
 
 
 @Client.on_callback_query(filters.regex(r"^fv#"))
@@ -316,7 +344,7 @@ async def set_filter_value(_, query):
         return
     entry["filters"][ftype] = None if value == "_any_" else value
     text, markup = _render(key, entry, offset=0)
-    await _push(query.message, text, markup, entry)
+    await _push(query.message, text, markup)
 
 
 @Client.on_callback_query(filters.regex(r"^rr#"))
@@ -328,7 +356,7 @@ async def return_to_results(_, query):
         await _expired(query.message)
         return
     text, markup = _render(key, entry, int(offset))
-    await _push(query.message, text, markup, entry)
+    await _push(query.message, text, markup)
 
 
 @Client.on_callback_query(filters.regex(r"^home#"))
@@ -341,4 +369,4 @@ async def reset_home(_, query):
         return
     entry["filters"] = dict(_EMPTY_FILTERS)
     text, markup = _render(key, entry, offset=0)
-    await _push(query.message, text, markup, entry)
+    await _push(query.message, text, markup)
