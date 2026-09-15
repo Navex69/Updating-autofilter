@@ -27,6 +27,9 @@ settings) — tap/open one and I'll send it to you here in PM.
 NOT_FOUND_TXT = "❌ No results found for <b>{query}</b>."
 
 RESULT_HEADER_TXT = "🔎 Results for <b>{query}</b> — found <b>{total}</b>:"
+RESULT_HEADER_CORRECTED_TXT = (
+    "🔎 Results for <b>{query}</b> <i>(auto-corrected from \"{original}\")</i> — found <b>{total}</b>:"
+)
 POSTER_CAPTION_TXT = "🎬 <b>{query}</b>"
 
 SEARCH_EXPIRED_TXT = "⏳ This search has expired. Please search again."
