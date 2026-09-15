@@ -50,7 +50,7 @@ CHANNELS = _int_list("CHANNELS", "-1002407564854")
 # (e.g. to force people into a group) without touching any code.
 ENABLE_PM_SEARCH = _bool("ENABLE_PM_SEARCH", True)
 RESULTS_PER_PAGE = int(os.environ.get("RESULTS_PER_PAGE", "8"))
-MIN_QUERY_LEN = int(os.environ.get("MIN_QUERY_LEN", "1"))
+MIN_QUERY_LEN = int(os.environ.get("MIN_QUERY_LEN", "4"))
 
 # ── Automatic poster fetch (TMDB primary, OMDb fallback) ───────────────────
 # Both optional — leave unset to disable poster fetching entirely. Get a free
@@ -58,6 +58,17 @@ MIN_QUERY_LEN = int(os.environ.get("MIN_QUERY_LEN", "1"))
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "e166a67b9b21ee3bd84bc189d567057b")
 OMDB_API_KEY = os.environ.get("OMDB_API_KEY", "436aac9c")
 POSTER_FETCH_TIMEOUT = int(os.environ.get("POSTER_FETCH_TIMEOUT", "6"))
+
+# ── Typo-correction fallback (only runs when exact search finds nothing) ───
+# Stage 2 (fuzzy match against your own DB) needs no setup and no keys.
+# Stage 3 (AI) only activates for whichever key(s) you actually set — leave
+# both empty to run fuzzy-match-only, set one or both to race them.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+AI_FETCH_TIMEOUT = int(os.environ.get("AI_FETCH_TIMEOUT", "6"))
+FUZZY_MATCH_THRESHOLD = int(os.environ.get("FUZZY_MATCH_THRESHOLD", "82"))
 
 # ── Optional: channel the bot logs indexing activity to ─────────────────────
 log_channel = os.environ.get("LOG_CHANNEL", "-1003073036876")
