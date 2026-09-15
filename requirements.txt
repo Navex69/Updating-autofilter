@@ -4,3 +4,4 @@ motor==3.7.1
 aiohttp
 python-dotenv
 shortzy
+rapidfuzz
