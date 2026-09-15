@@ -13,11 +13,12 @@ from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE, MIN_QUERY_LEN
 from database.filters_db import search_files, display_name, extract_meta, apply_filters
 from database.settings_db import get_settings
 from poster import fetch_poster
+from spellcheck import fuzzy_correct, ai_correct
 from utils import temp, human_size
 from strings import (
-    NOT_FOUND_TXT, RESULT_HEADER_TXT, POSTER_CAPTION_TXT, SEARCH_EXPIRED_TXT,
-    QUERY_AUTODELETE_NOTE, FILTER_LABELS, FILTER_MENU_TXT, FILTER_CLEAR_BTN,
-    HOME_BTN, NO_MATCH_TXT,
+    NOT_FOUND_TXT, RESULT_HEADER_TXT, RESULT_HEADER_CORRECTED_TXT, POSTER_CAPTION_TXT,
+    SEARCH_EXPIRED_TXT, QUERY_AUTODELETE_NOTE, FILTER_LABELS, FILTER_MENU_TXT,
+    FILTER_CLEAR_BTN, HOME_BTN, NO_MATCH_TXT,
 )
 
 TEXT_LIMIT = 4096  # Telegram's hard cap for a plain message — defensive only,
@@ -73,12 +74,13 @@ def _cache_get(key: str) -> dict | None:
     return entry
 
 
-def _cache_put(key: str, query: str, results: list, mode: str, poster) -> dict:
+def _cache_put(key: str, query: str, results: list, mode: str, poster, original_query: str | None = None) -> dict:
     if len(_CACHE) >= _CACHE_MAX_ENTRIES:
         oldest = min(_CACHE, key=lambda k: _CACHE[k]["time"])
         _CACHE.pop(oldest, None)
     entry = {
         "query": query,
+        "original_query": original_query,  # set only when a typo-correction was used
         "results": results,
         "mode": mode,
         "meta": extract_meta(results),
@@ -158,7 +160,15 @@ def _render(key: str, entry: dict, offset: int):
     elif offset >= total:
         offset = ((total - 1) // RESULTS_PER_PAGE) * RESULTS_PER_PAGE
     page = filtered[offset:offset + RESULTS_PER_PAGE]
-    header = RESULT_HEADER_TXT.format(query=html.escape(entry["query"]), total=total)
+    header = (
+        RESULT_HEADER_CORRECTED_TXT.format(
+            query=html.escape(entry["query"]),
+            original=html.escape(entry["original_query"]),
+            total=total,
+        )
+        if entry.get("original_query")
+        else RESULT_HEADER_TXT.format(query=html.escape(entry["query"]), total=total)
+    )
 
     rows = _filter_rows(key, entry["meta"], entry["filters"], offset)
 
@@ -258,20 +268,47 @@ async def handle_search(_, message):
     if len(query) < MIN_QUERY_LEN:
         return
 
-    # DB search and poster lookup run concurrently — the network round trip
-    # for the poster never adds latency on top of the DB query.
+    # Stage 1 — normal DB search, and the poster lookup, run concurrently.
+    # This is the only stage 90%+ of searches ever need, and neither the
+    # fuzzy-match nor the AI stage below ever runs unless this comes back
+    # empty — a correctly-spelled query is completely unaffected by any of
+    # this feature, in both speed and behaviour.
     results, poster = await asyncio.gather(
         search_files(query),
         fetch_poster(query),
     )
+
+    resolved_query = query
+    original_query = None
+
+    if not results:
+        # Stage 2 — fuzzy match against your own DB's titles. Free,
+        # in-memory, a few milliseconds. Catches ordinary typos without
+        # ever cross-matching a different-but-similar-looking title (word
+        # count must match and every word must score high individually).
+        hit = await fuzzy_correct(query)
+        if not hit:
+            # Stage 3 — Groq + Gemini race, each guess re-verified against
+            # the real database before it's trusted. Only reached when
+            # Stage 1 AND Stage 2 both found nothing.
+            hit = await ai_correct(query)
+        if hit:
+            resolved_query, results = hit
+            original_query = query
+            # The original query's poster lookup was based on a misspelled
+            # title and likely came back empty — retry with the corrected
+            # one now that we actually know it.
+            if not poster:
+                poster = await fetch_poster(resolved_query)
+
     if not results:
         await message.reply_text(NOT_FOUND_TXT.format(query=html.escape(query)), quote=True)
         return
 
     settings = await get_settings()
     mode = settings["result_mode"]
-    key = _cache_key(query)
-    entry = _cache_put(key, query, results, mode, poster)
+    key = _cache_key(resolved_query)
+    entry = _cache_put(key, resolved_query, results, mode, poster, original_query)
 
     text, markup = _render(key, entry, offset=0)
     if settings["query_autodelete_enabled"]:
@@ -285,7 +322,7 @@ async def handle_search(_, message):
     if poster:
         poster_msg = await message.reply_photo(
             poster["url"],
-            caption=POSTER_CAPTION_TXT.format(query=html.escape(query)),
+            caption=POSTER_CAPTION_TXT.format(query=html.escape(resolved_query)),
             quote=True,
         )
         to_delete.append(poster_msg)
