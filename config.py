@@ -63,9 +63,9 @@ POSTER_FETCH_TIMEOUT = int(os.environ.get("POSTER_FETCH_TIMEOUT", "6"))
 # Stage 2 (fuzzy match against your own DB) needs no setup and no keys.
 # Stage 3 (AI) only activates for whichever key(s) you actually set — leave
 # both empty to run fuzzy-match-only, set one or both to race them.
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AQ.Ab8RN6IkIRyZr_PlKTFG8KLhxpArWz3yOFlJpCNqpc3fwlpuNg")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 AI_FETCH_TIMEOUT = int(os.environ.get("AI_FETCH_TIMEOUT", "6"))
 FUZZY_MATCH_THRESHOLD = int(os.environ.get("FUZZY_MATCH_THRESHOLD", "82"))
