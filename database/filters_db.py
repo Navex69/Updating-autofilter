@@ -34,6 +34,21 @@ def display_name(doc: dict) -> str:
     return (doc.get("caption") or "").strip() or doc.get("file_name", "Unnamed file")
 
 
+async def export_all_captions(path: str) -> int:
+    """Write every indexed file's display caption to a local text file, one
+    per line — lets an admin see exactly what's really in the database
+    (real formatting, real spelling) before tuning search behaviour.
+    Streams via cursor so it stays memory-safe no matter the collection
+    size. Returns the number of lines written."""
+    count = 0
+    with open(path, "w", encoding="utf-8") as f:
+        cursor = files.find({}, {"file_name": 1, "caption": 1})
+        async for doc in cursor:
+            f.write(display_name(doc) + "\n")
+            count += 1
+    return count
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # INDEXING (auto + manual share this single entrypoint)
 # ══════════════════════════════════════════════════════════════════════════════
