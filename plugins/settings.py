@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import time
 
 from pyrogram import Client, filters, enums
 from pyrogram.errors import RPCError
@@ -12,7 +14,7 @@ from database.settings_db import (
     add_index_channel, remove_index_channel,
 )
 from database.premium_db import list_premium, count_premium
-from database.filters_db import count_by_channel
+from database.filters_db import count_by_channel, export_all_captions
 from plugins.force_sub import is_bot_admin_in
 from shortlink import make_short_link
 from utils import mask_secret, IST
@@ -32,6 +34,7 @@ from strings import (
     ASK_QUERY_DELAY_PROMPT, QUERY_DELAY_SET_TXT,
     ASK_FILE_DELAY_PROMPT, FILE_DELAY_SET_TXT,
     ASK_FILE_LIMIT_PROMPT, FILE_LIMIT_SET_TXT, FILE_LIMIT_NEEDS_VERIFY_NOTE,
+    EXPORT_CAPTIONS_PREPARING, EXPORT_CAPTIONS_CAPTION_TXT, EXPORT_CAPTIONS_EMPTY_TXT,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +80,7 @@ def build_main_menu(settings: dict) -> InlineKeyboardMarkup:
              f"🔢 File Limit ({settings['file_limit_count']}/day)",
              callback_data="cfg#ask#file_limit",
          )],
+        [InlineKeyboardButton("📄 Export All Captions", callback_data="cfg#export")],
         [InlineKeyboardButton("❌ Close", callback_data="cfg#close")],
     ])
 
@@ -280,6 +284,24 @@ async def settings_callback(bot, query):
     if action == "ask":
         await query.answer()
         await _run_ask_number(bot, query, parts[2])
+        return
+
+    if action == "export":
+        await query.answer(EXPORT_CAPTIONS_PREPARING)
+        path = f"/tmp/captions_export_{int(time.time())}.txt"
+        try:
+            count = await export_all_captions(path)
+            if count == 0:
+                await query.message.reply_text(EXPORT_CAPTIONS_EMPTY_TXT)
+                return
+            await query.message.reply_document(
+                path, caption=EXPORT_CAPTIONS_CAPTION_TXT.format(count=count),
+            )
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
         return
 
 
