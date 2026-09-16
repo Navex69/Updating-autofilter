@@ -9,7 +9,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE, MIN_QUERY_LEN
+from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE
 from database.filters_db import search_files, display_name, extract_meta, apply_filters
 from database.settings_db import get_settings
 from poster import fetch_poster
@@ -265,7 +265,7 @@ async def _schedule_delete(message, seconds: int):
 @Client.on_message(search_filter)
 async def handle_search(_, message):
     query = message.text.strip()
-    if len(query) < MIN_QUERY_LEN:
+    if not query:
         return
 
     # Stage 1 — normal DB search, and the poster lookup, run concurrently.
