@@ -50,7 +50,6 @@ CHANNELS = _int_list("CHANNELS", "-1002407564854")
 # (e.g. to force people into a group) without touching any code.
 ENABLE_PM_SEARCH = _bool("ENABLE_PM_SEARCH", True)
 RESULTS_PER_PAGE = int(os.environ.get("RESULTS_PER_PAGE", "8"))
-MIN_QUERY_LEN = int(os.environ.get("MIN_QUERY_LEN", "4"))
 
 # ── Automatic poster fetch (TMDB primary, OMDb fallback) ───────────────────
 # Both optional — leave unset to disable poster fetching entirely. Get a free
