@@ -137,3 +137,7 @@ FILE_DELAY_SET_TXT = "✅ Delivered files will now self-delete after <code>{seco
 ASK_FILE_LIMIT_PROMPT = "Send how many free files a non-premium user can get per day (e.g. <code>2</code>)."
 FILE_LIMIT_SET_TXT = "✅ Free daily file limit set to <code>{count}</code>."
 FILE_LIMIT_NEEDS_VERIFY_NOTE = "\n\n⚠️ File limit only takes effect while <b>Verification</b> is also on — it's currently off, so this has no effect yet."
+
+EXPORT_CAPTIONS_PREPARING = "📄 Preparing export…"
+EXPORT_CAPTIONS_CAPTION_TXT = "📄 Exported <b>{count}</b> file captions from the database."
+EXPORT_CAPTIONS_EMPTY_TXT = "⚠️ No files are indexed yet — nothing to export."
