@@ -32,6 +32,18 @@ RESULT_HEADER_CORRECTED_TXT = (
 )
 POSTER_CAPTION_TXT = "🎬 <b>{query}</b>"
 
+# ── progressive search-stage status message (edited in place, one line per
+# stage, so the user can see what the bot is doing rather than waiting on a
+# silent bot during the (rare) fuzzy/AI fallback path) ─────────────────────
+STATUS_STAGE1_TXT = "🔍 Searching for <b>{query}</b>..."
+STATUS_STAGE1_EMPTY_TXT = "❌ No direct match found."
+STATUS_STAGE2_TXT = "🔁 Checking fuzzy match..."
+STATUS_STAGE2_FOUND_TXT = "✅ Fuzzy match found: <b>{title}</b>"
+STATUS_STAGE2_EMPTY_TXT = "❌ Fuzzy match found nothing confident."
+STATUS_STAGE3_TXT = "🤖 Asking AI for the correct title..."
+STATUS_STAGE3_FOUND_TXT = "✅ AI found: <b>{title}</b>"
+STATUS_STAGE3_EMPTY_TXT = "❌ AI could not confidently identify the title."
+
 SEARCH_EXPIRED_TXT = "⏳ This search has expired. Please search again."
 
 # ── Result-page filters (season / language / episode / year / quality) ──────
@@ -141,3 +153,10 @@ FILE_LIMIT_NEEDS_VERIFY_NOTE = "\n\n⚠️ File limit only takes effect while <b
 EXPORT_CAPTIONS_PREPARING = "📄 Preparing export…"
 EXPORT_CAPTIONS_CAPTION_TXT = "📄 Exported <b>{count}</b> file captions from the database."
 EXPORT_CAPTIONS_EMPTY_TXT = "⚠️ No files are indexed yet — nothing to export."
+
+BACKFILL_RUNNING = "🔁 Backfilling search index — this may take a moment…"
+BACKFILL_DONE_TXT = (
+    "✅ Backfill complete — updated <b>{count}</b> file(s).\n\n"
+    "Files indexed before this update needed this one-time step so search "
+    "can find them; anything indexed from now on gets it automatically."
+)
