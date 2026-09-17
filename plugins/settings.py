@@ -14,7 +14,7 @@ from database.settings_db import (
     add_index_channel, remove_index_channel,
 )
 from database.premium_db import list_premium, count_premium
-from database.filters_db import count_by_channel, export_all_captions
+from database.filters_db import count_by_channel, export_all_captions, backfill_word_index
 from plugins.force_sub import is_bot_admin_in
 from shortlink import make_short_link
 from utils import mask_secret, IST
@@ -35,6 +35,7 @@ from strings import (
     ASK_FILE_DELAY_PROMPT, FILE_DELAY_SET_TXT,
     ASK_FILE_LIMIT_PROMPT, FILE_LIMIT_SET_TXT, FILE_LIMIT_NEEDS_VERIFY_NOTE,
     EXPORT_CAPTIONS_PREPARING, EXPORT_CAPTIONS_CAPTION_TXT, EXPORT_CAPTIONS_EMPTY_TXT,
+    BACKFILL_RUNNING, BACKFILL_DONE_TXT,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ def build_main_menu(settings: dict) -> InlineKeyboardMarkup:
              callback_data="cfg#ask#file_limit",
          )],
         [InlineKeyboardButton("📄 Export All Captions", callback_data="cfg#export")],
+        [InlineKeyboardButton("🔁 Backfill Search Index", callback_data="cfg#backfill")],
         [InlineKeyboardButton("❌ Close", callback_data="cfg#close")],
     ])
 
@@ -302,6 +304,12 @@ async def settings_callback(bot, query):
                 os.remove(path)
             except OSError:
                 pass
+        return
+
+    if action == "backfill":
+        await query.answer(BACKFILL_RUNNING)
+        updated = await backfill_word_index()
+        await query.message.reply_text(BACKFILL_DONE_TXT.format(count=updated))
         return
 
 
