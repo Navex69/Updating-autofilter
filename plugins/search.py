@@ -19,6 +19,9 @@ from strings import (
     NOT_FOUND_TXT, RESULT_HEADER_TXT, RESULT_HEADER_CORRECTED_TXT, POSTER_CAPTION_TXT,
     SEARCH_EXPIRED_TXT, QUERY_AUTODELETE_NOTE, FILTER_LABELS, FILTER_MENU_TXT,
     FILTER_CLEAR_BTN, HOME_BTN, NO_MATCH_TXT,
+    STATUS_STAGE1_TXT, STATUS_STAGE1_EMPTY_TXT,
+    STATUS_STAGE2_TXT, STATUS_STAGE2_FOUND_TXT, STATUS_STAGE2_EMPTY_TXT,
+    STATUS_STAGE3_TXT, STATUS_STAGE3_FOUND_TXT, STATUS_STAGE3_EMPTY_TXT,
 )
 
 TEXT_LIMIT = 4096  # Telegram's hard cap for a plain message — defensive only,
@@ -262,21 +265,31 @@ async def _schedule_delete(message, seconds: int):
         pass
 
 
+async def _status_update(message, lines: list):
+    try:
+        return await message.edit_text("\n".join(lines), disable_web_page_preview=True)
+    except RPCError:
+        return message
+
+
 @Client.on_message(search_filter)
 async def handle_search(_, message):
     query = message.text.strip()
     if not query:
         return
 
-    # Stage 1 — normal DB search, and the poster lookup, run concurrently.
-    # This is the only stage 90%+ of searches ever need, and neither the
-    # fuzzy-match nor the AI stage below ever runs unless this comes back
-    # empty — a correctly-spelled query is completely unaffected by any of
-    # this feature, in both speed and behaviour.
+    # The "Searching..." status message is sent concurrently with the real
+    # Stage 1 work below, not before it — so showing search progress never
+    # adds latency to the common case where Stage 1 already finds it.
+    status_task = asyncio.create_task(
+        message.reply_text(STATUS_STAGE1_TXT.format(query=html.escape(query)), quote=True)
+    )
     results, poster = await asyncio.gather(
         search_files(query),
         fetch_poster(query),
     )
+    status = await status_task
+    lines = [STATUS_STAGE1_TXT.format(query=html.escape(query))]
 
     resolved_query = query
     original_query = None
@@ -286,23 +299,41 @@ async def handle_search(_, message):
         # in-memory, a few milliseconds. Catches ordinary typos without
         # ever cross-matching a different-but-similar-looking title (word
         # count must match and every word must score high individually).
+        lines.append(STATUS_STAGE1_EMPTY_TXT)
+        lines.append(STATUS_STAGE2_TXT)
+        status = await _status_update(status, lines)
+
         hit = await fuzzy_correct(query)
-        if not hit:
+        if hit:
+            resolved_query, results = hit
+            original_query = query
+            lines.append(STATUS_STAGE2_FOUND_TXT.format(title=html.escape(resolved_query)))
+        else:
+            lines.append(STATUS_STAGE2_EMPTY_TXT)
+            lines.append(STATUS_STAGE3_TXT)
+            status = await _status_update(status, lines)
+
             # Stage 3 — Groq + Gemini race, each guess re-verified against
             # the real database before it's trusted. Only reached when
             # Stage 1 AND Stage 2 both found nothing.
             hit = await ai_correct(query)
-        if hit:
-            resolved_query, results = hit
-            original_query = query
+            if hit:
+                resolved_query, results = hit
+                original_query = query
+                lines.append(STATUS_STAGE3_FOUND_TXT.format(title=html.escape(resolved_query)))
+            else:
+                lines.append(STATUS_STAGE3_EMPTY_TXT)
+
+        if results and not poster:
             # The original query's poster lookup was based on a misspelled
             # title and likely came back empty — retry with the corrected
             # one now that we actually know it.
-            if not poster:
-                poster = await fetch_poster(resolved_query)
+            poster = await fetch_poster(resolved_query)
 
     if not results:
-        await message.reply_text(NOT_FOUND_TXT.format(query=html.escape(query)), quote=True)
+        lines.append("")
+        lines.append(NOT_FOUND_TXT.format(query=html.escape(query)))
+        await _status_update(status, lines)
         return
 
     settings = await get_settings()
@@ -332,6 +363,10 @@ async def handle_search(_, message):
             text, reply_markup=markup, quote=True, disable_web_page_preview=True,
         )
     to_delete.append(sent)
+
+    # The stage-progress message has done its job now that the real result
+    # message(s) are in the chat — clear it without making the user wait.
+    asyncio.create_task(_schedule_delete(status, 0))
 
     if settings["query_autodelete_enabled"]:
         for m in to_delete:
