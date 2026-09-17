@@ -1,7 +1,7 @@
 import logging
 import re
 import time
-from pymongo import TEXT, ASCENDING
+from pymongo import ASCENDING
 from pymongo.errors import DuplicateKeyError
 from config import COLLECTION_NAME
 from database.client import db
@@ -17,11 +17,10 @@ _RESULT_FIELDS = {
 
 async def ensure_indexes():
     """Call once at startup. Safe to call repeatedly — Mongo no-ops if present."""
-    await files.create_index(
-        [("file_name", TEXT), ("caption", TEXT)],
-        weights={"file_name": 10, "caption": 3},
-        name="search_text_idx",
-    )
+    # `words` backs the primary search path (see search_files below) — a
+    # plain multikey index Mongo builds automatically for an array field,
+    # giving indexed, exact, stopword-free word lookups.
+    await files.create_index([("words", ASCENDING)], name="words_idx")
     await files.create_index([("file_unique_id", ASCENDING)], unique=True, name="uniq_file_idx")
     await files.create_index([("channel_id", ASCENDING)], name="channel_idx")
     logger.info("Database indexes ready.")
@@ -50,6 +49,25 @@ async def export_all_captions(path: str) -> int:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# WORD TOKENISING — shared by indexing (save_file) and searching (search_files)
+# so the two sides always agree on what counts as "the same word". Splitting
+# on any non-alphanumeric character makes it completely punctuation-agnostic
+# (dots, underscores, brackets, hyphens all count as a separator) without
+# ever altering the letters/numbers themselves — nothing is stemmed,
+# corrected, or dropped the way MongoDB's own $text/English-stopword system
+# would (that system was quietly discarding words like "and"/"from"
+# entirely, which is what let "Vishwanath and Son" degrade into a
+# bare "son" search).
+# ══════════════════════════════════════════════════════════════════════════════
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> list:
+    return _WORD_RE.findall(text.lower())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # INDEXING (auto + manual share this single entrypoint)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -69,12 +87,16 @@ async def save_file(media, channel_id: int | None = None) -> str:
     if not file_unique_id:
         return "skipped"
 
+    caption = getattr(media, "caption", "") or ""
+    words = sorted(set(_tokenize(f"{file_name} {caption}")))
+
     doc = {
         "file_id": media.file_id,
         "file_unique_id": file_unique_id,
         "file_name": file_name,
         "file_size": getattr(media, "file_size", 0) or 0,
-        "caption": getattr(media, "caption", "") or "",
+        "caption": caption,
+        "words": words,
         "file_type": getattr(media, "file_type", "document"),
         "mime_type": getattr(media, "mime_type", "") or "",
         "channel_id": channel_id,
@@ -88,10 +110,10 @@ async def save_file(media, channel_id: int | None = None) -> str:
         # Same file re-posted or re-indexed. If the caption changed, keep it
         # fresh — captions are edited more often than files are re-uploaded.
         existing = await files.find_one({"file_unique_id": file_unique_id}, {"caption": 1})
-        if existing is not None and existing.get("caption", "") != doc["caption"]:
+        if existing is not None and existing.get("caption", "") != caption:
             await files.update_one(
                 {"file_unique_id": file_unique_id},
-                {"$set": {"caption": doc["caption"], "file_name": file_name}},
+                {"$set": {"caption": caption, "file_name": file_name, "words": words}},
             )
             return "updated"
         return "duplicate"
@@ -108,60 +130,42 @@ async def count_by_channel(channel_id: int) -> int:
     return await files.count_documents({"channel_id": channel_id})
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SEARCH
-# ══════════════════════════════════════════════════════════════════════════════
-
-_MAX_FETCH = 200  # hard ceiling per query, keeps a broad/bad query cheap
-
-
-async def search_files(query: str) -> list:
+async def backfill_word_index(batch_size: int = 500) -> int:
     """
-    Return up to _MAX_FETCH matching documents, best match first.
-    Callers paginate this list in memory — one DB round trip per query,
-    not one per page.
+    One-time migration for files indexed before the `words` field existed.
+    Safe to run repeatedly (idempotent) and safe to run while the bot is
+    live — updates stream in small batches so it never holds a large chunk
+    of the collection in memory or blocks the DB for long.
+    Returns the number of documents updated.
     """
-    query = query.strip()
-    if not query:
-        return []
+    from pymongo import UpdateOne
 
-    cursor = (
-        files.find(
-            {"$text": {"$search": query}},
-            {**_RESULT_FIELDS, "score": {"$meta": "textScore"}},
-        )
-        .sort([("score", {"$meta": "textScore"})])
-        .limit(_MAX_FETCH)
+    updated = 0
+    batch = []
+    cursor = files.find(
+        {"words": {"$exists": False}}, {"file_name": 1, "caption": 1},
     )
-    results = await cursor.to_list(length=_MAX_FETCH)
-    if results:
-        return results
-
-    # Fallback: the text index found nothing (common on partial words —
-    # "aveng" won't match "avengers" via $text). Try a bounded regex scan.
-    import re
-    try:
-        pattern = re.compile(re.escape(query).replace(r"\ ", r".*"), re.IGNORECASE)
-    except re.error:
-        return []
-    cursor = files.find({"file_name": pattern}, _RESULT_FIELDS).limit(_MAX_FETCH)
-    return await cursor.to_list(length=_MAX_FETCH)
-
-
-async def get_file_by_id(object_id: str) -> dict | None:
-    from bson import ObjectId
-    from bson.errors import InvalidId
-    try:
-        oid = ObjectId(object_id)
-    except InvalidId:
-        return None
-    return await files.find_one({"_id": oid})
+    async for doc in cursor:
+        words = sorted(set(_tokenize(f"{doc.get('file_name', '')} {doc.get('caption', '') or ''}")))
+        batch.append(UpdateOne({"_id": doc["_id"]}, {"$set": {"words": words}}))
+        if len(batch) >= batch_size:
+            await files.bulk_write(batch, ordered=False)
+            updated += len(batch)
+            batch = []
+    if batch:
+        await files.bulk_write(batch, ordered=False)
+        updated += len(batch)
+    return updated
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # RESULT FILTERING — season / language / year / quality / episode
-# Extracted straight from file_name + caption text, once per search (meta),
-# then re-applied in memory on every filter tap. No extra DB round trips.
+# Extracted straight from file_name + caption text. Used two ways:
+#   1. Post-search, to power the Season/Language/Year/Quality/Episode
+#      filter buttons on a result page.
+#   2. Up front, by parse_query() below, to pull the same kind of tag out
+#      of the user's own typed query so it narrows Stage 1 search results
+#      instead of being searched as if it were part of the title.
 # ══════════════════════════════════════════════════════════════════════════════
 
 _SE_PATTERN = re.compile(r"\bS(\d{1,2})E(\d{1,3})\b", re.IGNORECASE)
@@ -169,12 +173,36 @@ _SEASON_PATTERN = re.compile(r"\bS(\d{1,2})\b|\bSeason\s*(\d{1,2})\b", re.IGNORE
 _EPISODE_PATTERN = re.compile(r"\bE(?:p(?:isode)?)?\s*(\d{1,3})\b", re.IGNORECASE)
 _YEAR_PATTERN = re.compile(r"\b(19[5-9]\d|20[0-3]\d)\b")
 
-_LANGUAGES = [
-    "hindi", "english", "tamil", "telugu", "kannada", "malayalam",
-    "bengali", "punjabi", "marathi", "gujarati", "urdu", "korean",
-    "japanese", "dual audio", "multi audio",
-]
-_LANG_PATTERNS = {lang: re.compile(rf"\b{re.escape(lang)}\b", re.IGNORECASE) for lang in _LANGUAGES}
+# canonical language -> every spelling/abbreviation seen in real captions
+# that should count as that language. Keep this evidence-based: only add an
+# abbreviation here once you've actually seen it used, since a short
+# abbreviation can coincide with an unrelated real word (e.g. "pun" is also
+# an English word) — the full names carry no such risk.
+_LANGUAGE_ALIASES = {
+    "hindi": ["hindi", "hin"],
+    "english": ["english", "eng"],
+    "tamil": ["tamil", "tam", "taml"],
+    "telugu": ["telugu", "tel"],
+    "kannada": ["kannada"],
+    "malayalam": ["malayalam"],
+    "bengali": ["bengali"],
+    "punjabi": ["punjabi"],
+    "marathi": ["marathi"],
+    "gujarati": ["gujarati"],
+    "urdu": ["urdu"],
+    "korean": ["korean"],
+    "japanese": ["japanese"],
+    "chinese": ["chinese"],
+    "spanish": ["spanish"],
+    "french": ["french"],
+    "german": ["german"],
+    "dual audio": ["dual audio", "dual"],
+    "multi audio": ["multi audio", "multi"],
+}
+_LANG_ALIAS_PATTERNS = {
+    canonical: re.compile(r"\b(?:" + "|".join(re.escape(a) for a in aliases) + r")\b", re.IGNORECASE)
+    for canonical, aliases in _LANGUAGE_ALIASES.items()
+}
 
 # (regex, code, label) — first match wins, ordered best quality first
 _QUALITY_RULES = [
@@ -191,6 +219,7 @@ _QUALITY_RULES = [
     (re.compile(r"\bdvdrip\b", re.IGNORECASE), "dvdrip", "DVDRip"),
     (re.compile(r"\b(cam|hdts|ts)\b", re.IGNORECASE), "cam", "CAM/TS"),
 ]
+_QUALITY_RANK = {code: len(_QUALITY_RULES) - i for i, (_pat, code, _label) in enumerate(_QUALITY_RULES)}
 
 
 def _doc_text(doc: dict) -> str:
@@ -223,7 +252,12 @@ def _year_of(text: str) -> str:
 
 
 def _languages_of(text: str) -> list:
-    return [lang for lang, pat in _LANG_PATTERNS.items() if pat.search(text)]
+    return [canonical for canonical, pat in _LANG_ALIAS_PATTERNS.items() if pat.search(text)]
+
+
+def _language_matches(text: str, canonical: str) -> bool:
+    pat = _LANG_ALIAS_PATTERNS.get(canonical)
+    return bool(pat and pat.search(text))
 
 
 def _quality_of(text: str) -> tuple:
@@ -231,6 +265,11 @@ def _quality_of(text: str) -> tuple:
         if pat.search(text):
             return code, label
     return "", ""
+
+
+def _quality_rank(text: str) -> int:
+    code, _label = _quality_of(text)
+    return _QUALITY_RANK.get(code, 0)
 
 
 def extract_meta(results: list) -> dict:
@@ -290,7 +329,181 @@ def apply_filters(results: list, filters: dict) -> list:
             continue
         if quality and _quality_of(text)[0] != quality:
             continue
-        if language and not _LANG_PATTERNS[language].search(text):
+        if language and not _language_matches(text, language):
             continue
         out.append(doc)
     return out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SEARCH
+# ══════════════════════════════════════════════════════════════════════════════
+
+_MAX_FETCH = 200        # hard ceiling on results returned per query
+_CANDIDATE_FETCH = 800  # how many word-index matches to pull before the
+                         # exact literal re-check narrows them down
+
+# Pure connective filler — kept intentionally minimal. "and" is stripped
+# because captions frequently drop it entirely ("Vishwanath Son" instead of
+# "Vishwanath and Son"), so requiring it literally would break an otherwise
+# correct, correctly-spelled search. Articles like "the"/"a" are
+# deliberately NOT stripped: captions do consistently keep them, and
+# dropping "the" from a title like "The Boy" would reduce the search down
+# to the single generic word "boy" — reintroducing the exact kind of
+# cross-title collision risk ("The Boy" vs "The Boys" vs "The Room") this
+# whole redesign exists to avoid. Every word the user types is a real,
+# required word unless it's in this short, deliberately conservative list.
+_FILLER_WORDS = {"and"}
+
+# Tag-extraction patterns match ONLY at the very end of the (remaining)
+# query, one tag at a time, never touching the start/middle — this is what
+# keeps a title that legitimately contains a language/quality-sounding word
+# ("Hindi Medium", "1917") intact, while still pulling out tags a user
+# actually appended ("... 1080p Hindi").
+_TRAILING_SE_RE = re.compile(
+    r"^(?P<title>.*\S)\s+S(?P<season>\d{1,2})E(?P<episode>\d{1,3})\s*$", re.IGNORECASE,
+)
+_TRAILING_SEASON_RE = re.compile(
+    r"^(?P<title>.*\S)\s+(?:S(?P<season1>\d{1,2})|Season\s*(?P<season2>\d{1,2}))\s*$", re.IGNORECASE,
+)
+_TRAILING_EPISODE_RE = re.compile(
+    r"^(?P<title>.*\S)\s+(?:Episode|Ep)\.?\s*(?P<episode>\d{1,3})\s*$", re.IGNORECASE,
+)
+_TRAILING_YEAR_RE = re.compile(r"^(?P<title>.*\S)\s+(?P<year>19[5-9]\d|20[0-3]\d)\s*$")
+_TRAILING_QUALITY_RE = re.compile(
+    r"^(?P<title>.*\S)\s+(?P<quality>2160p|4k|uhd|1080p|720p|480p|360p|"
+    r"blu-?ray|bdrip|web-?dl|webrip|hdrip|hdtv|dvdrip|cam|hdts|ts)\s*$",
+    re.IGNORECASE,
+)
+_ALL_LANG_ALIASES = sorted(
+    {alias for aliases in _LANGUAGE_ALIASES.values() for alias in aliases},
+    key=len, reverse=True,
+)
+_TRAILING_LANG_RE = re.compile(
+    r"^(?P<title>.*\S)\s+(?P<lang>" + "|".join(re.escape(a) for a in _ALL_LANG_ALIASES) + r")\s*$",
+    re.IGNORECASE,
+)
+
+_TRAILING_PATTERNS = [
+    ("se", _TRAILING_SE_RE),
+    ("season", _TRAILING_SEASON_RE),
+    ("episode", _TRAILING_EPISODE_RE),
+    ("year", _TRAILING_YEAR_RE),
+    ("quality", _TRAILING_QUALITY_RE),
+    ("language", _TRAILING_LANG_RE),
+]
+
+
+def parse_query(query: str) -> tuple:
+    """
+    Split a raw user query into (title, tags) by repeatedly peeling a
+    recognised tag off the END of the query only. Returns the untouched
+    title (same words, same order, same spelling the user typed) plus
+    whichever of season/episode/year/quality/language were found trailing
+    it. Never strips a query down to nothing — a query that IS just "1917"
+    stays a title, not a year.
+    """
+    title = query.strip()
+    tags = {"season": None, "episode": None, "year": None, "quality": None, "language": None}
+    if not title:
+        return title, tags
+
+    progress = True
+    while progress:
+        progress = False
+        for kind, pattern in _TRAILING_PATTERNS:
+            m = pattern.match(title)
+            if not m:
+                continue
+            candidate = m.group("title").strip()
+            if not candidate:
+                continue  # would empty the title out — refuse and try nothing else this round
+
+            if kind == "se":
+                tags["season"] = tags["season"] if tags["season"] is not None else int(m.group("season"))
+                tags["episode"] = tags["episode"] if tags["episode"] is not None else int(m.group("episode"))
+            elif kind == "season":
+                num = m.group("season1") or m.group("season2")
+                tags["season"] = tags["season"] if tags["season"] is not None else int(num)
+            elif kind == "episode":
+                tags["episode"] = tags["episode"] if tags["episode"] is not None else int(m.group("episode"))
+            elif kind == "year":
+                tags["year"] = tags["year"] or m.group("year")
+            elif kind == "quality":
+                code, _label = _quality_of(m.group("quality"))
+                tags["quality"] = tags["quality"] or code
+            elif kind == "language":
+                langs = _languages_of(m.group("lang"))
+                if langs and not tags["language"]:
+                    tags["language"] = langs[0]
+
+            title = candidate
+            progress = True
+            break  # restart the pattern list against the now-shorter title
+
+    return title, tags
+
+
+def _search_words(title: str) -> list:
+    words = [w for w in _tokenize(title) if w not in _FILLER_WORDS]
+    return words or _tokenize(title)  # never end up requiring zero words
+
+
+def _title_regex(words: list):
+    if not words:
+        return None
+    pattern = r".*".join(re.escape(w) for w in words)
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        return None
+
+
+async def search_files(query: str) -> list:
+    """
+    Stage 1 search. Deliberately simple and literal:
+      1. Pull any trailing season/episode/year/quality/language tag off the
+         query (never touching the title itself).
+      2. Look up the remaining title's words in the database's own word
+         index — an exact, indexed, stopword-free lookup (MongoDB's built-in
+         $text search silently drops common words like "and"/"from" as
+         English stopwords, which is what caused unrelated files to match
+         on a single leftover word before; this index has no such list).
+      3. Re-check every candidate against the literal title, words in the
+         exact order the user typed them, to rule out coincidental/
+         scattered word matches.
+      4. Hard-filter by whatever tags were pulled out in step 1.
+    Callers paginate the returned list in memory — one DB round trip per
+    query, not one per page.
+    """
+    query = query.strip()
+    if not query:
+        return []
+
+    title, tags = parse_query(query)
+    words = _search_words(title)
+    regex = _title_regex(words)
+    if regex is None:
+        return []
+
+    cursor = files.find({"words": {"$all": words}}, _RESULT_FIELDS).limit(_CANDIDATE_FETCH)
+    candidates = await cursor.to_list(length=_CANDIDATE_FETCH)
+
+    results = [doc for doc in candidates if regex.search(_doc_text(doc))]
+
+    active_tags = {k: v for k, v in tags.items() if v is not None}
+    if active_tags:
+        results = apply_filters(results, active_tags)
+
+    results.sort(key=lambda d: -_quality_rank(_doc_text(d)))
+    return results[:_MAX_FETCH]
+
+
+async def get_file_by_id(object_id: str) -> dict | None:
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    try:
+        oid = ObjectId(object_id)
+    except InvalidId:
+        return None
+    return await files.find_one({"_id": oid})
