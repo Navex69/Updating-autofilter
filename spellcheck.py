@@ -33,7 +33,7 @@ from config import (
     GROQ_API_KEY, GROQ_MODEL, GEMINI_API_KEY, GEMINI_MODEL,
     AI_FETCH_TIMEOUT, FUZZY_MATCH_THRESHOLD,
 )
-from database.filters_db import files, search_files
+from database.filters_db import files, search_files, clean_title, display_name
 
 logger = logging.getLogger(__name__)
 
@@ -46,33 +46,12 @@ _TITLE_CACHE_TIME = 0.0
 _TITLE_CACHE_TTL = 600            # rebuild at most every 10 minutes
 _TITLE_CACHE_FETCH_LIMIT = 8000   # bounded — cheap even on a huge collection
 
-_JUNK_RE = re.compile(
-    r"\b(s\d{1,2}e?\d{0,3}|season\s*\d+|episode\s*\d+|\d{3,4}p|4k|uhd|hdr\d*|"
-    r"bluray|bdrip|remux|web-?dl|webrip|hdrip|dvdrip|hdtv|cam|hdts|\bts\b|"
-    r"hevc|x264|x265|avc|av1|aac|ddp\d?\.?\d?|dts|flac|mp3|ac3|"
-    r"esubs?|subs?|subbed|dubbed|dual audio|multi audio|dual|multi|"
-    r"hindi|english|tamil|telugu|kannada|malayalam|bengali|punjabi|marathi|"
-    r"gujarati|urdu|korean|japanese)\b.*",
-    re.IGNORECASE,
-)
-_PUNCT_RE = re.compile(r"[._\-+\[\]()'\"~]+")
-_YEAR_RE = re.compile(r"\b(19[5-9]\d|20[0-3]\d)\b")
-_SPACE_RE = re.compile(r"\s{2,}")
-
-
-def _clean_title(text: str) -> str:
-    t = _YEAR_RE.sub(" ", text)
-    t = _JUNK_RE.sub(" ", t)
-    t = _PUNCT_RE.sub(" ", t)
-    return _SPACE_RE.sub(" ", t).strip()
-
 
 async def _rebuild_title_cache() -> list:
     seen, result = set(), []
     cursor = files.find({}, {"file_name": 1, "caption": 1, "_id": 0}).limit(_TITLE_CACHE_FETCH_LIMIT)
     async for doc in cursor:
-        raw = (doc.get("caption") or "").strip() or doc.get("file_name", "")
-        clean = _clean_title(raw)
+        clean = clean_title(display_name(doc))
         key = clean.lower()
         if key and key not in seen:
             seen.add(key)
@@ -134,10 +113,30 @@ def _per_word_score(query_words: list, cand_words: list) -> float:
     return (total_score / n) - 0.5 * (total_len_diff / n)
 
 
+def _trailing_number(text: str) -> str | None:
+    m = re.search(r"\b(\d{1,3})\s*$", text.strip())
+    return m.group(1) if m else None
+
+
+def _sequel_number_preserved(original: str, candidate: str) -> bool:
+    """
+    A spelling corrector should never re-decide which sequel/season/part
+    the user meant — only fix how they spelled it. If the query explicitly
+    ends in a number ("Weak Hero Class 2"), a correction that changes or
+    drops that number ("Weak Hero Class 1") is being changed to a
+    different, real title, not spell-corrected — reject it outright rather
+    than let a fuzzy score or an AI's best guess quietly substitute it.
+    """
+    original_num = _trailing_number(original)
+    if original_num is None:
+        return True  # nothing to protect
+    return _trailing_number(candidate) == original_num
+
+
 def _best_fuzzy_match(query: str, cache: list):
     """Pure CPU work — called via asyncio.to_thread so it never blocks the
     event loop while other users' searches are being served."""
-    q_clean = _clean_title(query).lower()
+    q_clean = clean_title(query).lower()
     q_words = q_clean.split()
     if not q_words:
         return None
@@ -145,6 +144,8 @@ def _best_fuzzy_match(query: str, cache: list):
 
     best_score, best_title = 0.0, None
     for key, original in cache:
+        if not _sequel_number_preserved(query, key):
+            continue
         if key.replace(" ", "") == q_collapsed:
             return original  # same letters, just spacing/punctuation differs
         cand_words = key.split()
@@ -180,7 +181,11 @@ _AI_PROMPT = (
     "You correct misspelled movie/TV/anime search queries for a file "
     "search engine. The user typed: \"{query}\". Reply with ONLY the "
     "corrected, most likely real title — no year, no explanation, no "
-    "punctuation beyond what belongs in the title itself. If you cannot "
+    "punctuation beyond what belongs in the title itself. "
+    "Only fix spelling — if the query names a specific numbered sequel, "
+    "season, or part (e.g. ends in \"2\", \"Part 3\", \"Chapter 1\"), your "
+    "answer MUST keep that exact same number; never substitute a "
+    "different or more familiar entry in the series. If you cannot "
     "confidently identify a real, existing movie/TV/anime title, reply "
     "with exactly: NONE"
 )
@@ -266,6 +271,9 @@ async def ai_correct(query: str):
                 except Exception:
                     guess = None
                 if not guess:
+                    continue
+                if not _sequel_number_preserved(query, guess):
+                    logger.info("AI guess %r rejected — changed sequel number in %r", guess, query)
                     continue
                 results = await search_files(guess)
                 if results:
