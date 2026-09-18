@@ -272,6 +272,34 @@ def _quality_rank(text: str) -> int:
     return _QUALITY_RANK.get(code, 0)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CLEAN TITLE — cuts everything from the first season/episode/year/quality/
+# language/technical-junk marker onward, since in real captions those tags
+# always come after the title, never before or in the middle. This is the
+# single canonical way both a query and a database caption get reduced to
+# "just the title" before Stage 1 compares them for an exact match.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_JUNK_RE = re.compile(
+    r"\b(s\d{1,2}e?\d{0,3}|season\s*\d+|ep(?:isode)?\.?\s*\d+|\d{3,4}p|4k|uhd|hdr\d*|"
+    r"bluray|bdrip|remux|web-?dl|webrip|hdrip|dvdrip|hdtv|cam|hdts|ts|"
+    r"hevc|x264|x265|avc|av1|aac|ddp\d?\.?\d?|dts|flac|mp3|ac3|"
+    r"esubs?|subs?|subbed|dubbed|dual\s*audio|multi\s*audio|dual|multi|"
+    + "|".join(re.escape(a) for aliases in _LANGUAGE_ALIASES.values() for a in aliases)
+    + r")\b.*",
+    re.IGNORECASE,
+)
+_TITLE_PUNCT_RE = re.compile(r"[._\-+\[\]()'\"~]+")
+_TITLE_SPACE_RE = re.compile(r"\s{2,}")
+
+
+def clean_title(text: str) -> str:
+    t = _YEAR_PATTERN.sub(" ", text)
+    t = _JUNK_RE.sub(" ", t)
+    t = _TITLE_PUNCT_RE.sub(" ", t)
+    return _TITLE_SPACE_RE.sub(" ", t).strip()
+
+
 def extract_meta(results: list) -> dict:
     """One pass over the full (unfiltered) result set. Returns the distinct
     filter values available, so filter buttons never offer an empty choice."""
@@ -339,27 +367,18 @@ def apply_filters(results: list, filters: dict) -> list:
 # SEARCH
 # ══════════════════════════════════════════════════════════════════════════════
 
-_MAX_FETCH = 200        # hard ceiling on results returned per query
-_CANDIDATE_FETCH = 800  # how many word-index matches to pull before the
-                         # exact literal re-check narrows them down
-
-# Pure connective filler — kept intentionally minimal. "and" is stripped
-# because captions frequently drop it entirely ("Vishwanath Son" instead of
-# "Vishwanath and Son"), so requiring it literally would break an otherwise
-# correct, correctly-spelled search. Articles like "the"/"a" are
-# deliberately NOT stripped: captions do consistently keep them, and
-# dropping "the" from a title like "The Boy" would reduce the search down
-# to the single generic word "boy" — reintroducing the exact kind of
-# cross-title collision risk ("The Boy" vs "The Boys" vs "The Room") this
-# whole redesign exists to avoid. Every word the user types is a real,
-# required word unless it's in this short, deliberately conservative list.
-_FILLER_WORDS = {"and"}
+_MAX_FETCH = 200          # hard ceiling on results returned per query
+_CANDIDATE_FETCH = 3000   # how many word-index matches to pull before the
+                           # exact-title re-check narrows them down — the
+                           # final check is a cheap string compare, so this
+                           # can afford to be generous
 
 # Tag-extraction patterns match ONLY at the very end of the (remaining)
 # query, one tag at a time, never touching the start/middle — this is what
 # keeps a title that legitimately contains a language/quality-sounding word
 # ("Hindi Medium", "1917") intact, while still pulling out tags a user
-# actually appended ("... 1080p Hindi").
+# actually appended ("... 1080p Hindi"). "Season 1"/"Season1"/"episode 3"/
+# "ep3" are all recognised regardless of spacing (\s* matches zero spaces).
 _TRAILING_SE_RE = re.compile(
     r"^(?P<title>.*\S)\s+S(?P<season>\d{1,2})E(?P<episode>\d{1,3})\s*$", re.IGNORECASE,
 )
@@ -444,35 +463,21 @@ def parse_query(query: str) -> tuple:
     return title, tags
 
 
-def _search_words(title: str) -> list:
-    words = [w for w in _tokenize(title) if w not in _FILLER_WORDS]
-    return words or _tokenize(title)  # never end up requiring zero words
-
-
-def _title_regex(words: list):
-    if not words:
-        return None
-    pattern = r".*".join(re.escape(w) for w in words)
-    try:
-        return re.compile(pattern, re.IGNORECASE)
-    except re.error:
-        return None
-
-
 async def search_files(query: str) -> list:
     """
-    Stage 1 search. Deliberately simple and literal:
+    Stage 1 search. Deliberately simple and strict:
       1. Pull any trailing season/episode/year/quality/language tag off the
          query (never touching the title itself).
-      2. Look up the remaining title's words in the database's own word
-         index — an exact, indexed, stopword-free lookup (MongoDB's built-in
-         $text search silently drops common words like "and"/"from" as
-         English stopwords, which is what caused unrelated files to match
-         on a single leftover word before; this index has no such list).
-      3. Re-check every candidate against the literal title, words in the
-         exact order the user typed them, to rule out coincidental/
-         scattered word matches.
-      4. Hard-filter by whatever tags were pulled out in step 1.
+      2. Reduce the remaining title to its clean form (same cut used on
+         database captions) and require an EXACT match — not "contains
+         these words", a full match — so a short query like "You" only
+         ever matches a file whose title genuinely IS "You", never "You
+         Love Me"; and "Weak Hero Class 2" never matches a file that's
+         actually "Weak Hero Class 1". A word-index lookup narrows the
+         candidates first purely for speed; the exact-title check is what
+         actually decides the result, so the narrowing step can never let
+         a wrong file through on its own.
+      3. Hard-filter by whatever tags were pulled out in step 1.
     Callers paginate the returned list in memory — one DB round trip per
     query, not one per page.
     """
@@ -481,15 +486,18 @@ async def search_files(query: str) -> list:
         return []
 
     title, tags = parse_query(query)
-    words = _search_words(title)
-    regex = _title_regex(words)
-    if regex is None:
+    query_key = clean_title(title).lower()
+    if not query_key:
+        return []
+
+    words = _tokenize(query_key)
+    if not words:
         return []
 
     cursor = files.find({"words": {"$all": words}}, _RESULT_FIELDS).limit(_CANDIDATE_FETCH)
     candidates = await cursor.to_list(length=_CANDIDATE_FETCH)
 
-    results = [doc for doc in candidates if regex.search(_doc_text(doc))]
+    results = [doc for doc in candidates if clean_title(display_name(doc)).lower() == query_key]
 
     active_tags = {k: v for k, v in tags.items() if v is not None}
     if active_tags:
