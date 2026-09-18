@@ -32,17 +32,11 @@ RESULT_HEADER_CORRECTED_TXT = (
 )
 POSTER_CAPTION_TXT = "🎬 <b>{query}</b>"
 
-# ── progressive search-stage status message (edited in place, one line per
-# stage, so the user can see what the bot is doing rather than waiting on a
-# silent bot during the (rare) fuzzy/AI fallback path) ─────────────────────
-STATUS_STAGE1_TXT = "🔍 Searching for <b>{query}</b>..."
-STATUS_STAGE1_EMPTY_TXT = "❌ No direct match found."
+# ── progressive search-stage status message (edited in place — one stage
+# replaces the previous line each time, never accumulated into a paragraph)
+STATUS_STAGE1_TXT = "🔎 Searching {query}..."
 STATUS_STAGE2_TXT = "🔁 Checking fuzzy match..."
-STATUS_STAGE2_FOUND_TXT = "✅ Fuzzy match found: <b>{title}</b>"
-STATUS_STAGE2_EMPTY_TXT = "❌ Fuzzy match found nothing confident."
-STATUS_STAGE3_TXT = "🤖 Asking AI for the correct title..."
-STATUS_STAGE3_FOUND_TXT = "✅ AI found: <b>{title}</b>"
-STATUS_STAGE3_EMPTY_TXT = "❌ AI could not confidently identify the title."
+STATUS_STAGE3_TXT = "🤖 Asking AI..."
 
 SEARCH_EXPIRED_TXT = "⏳ This search has expired. Please search again."
 
