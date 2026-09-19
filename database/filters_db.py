@@ -280,6 +280,7 @@ def _quality_rank(text: str) -> int:
 # "just the title" before Stage 1 compares them for an exact match.
 # ══════════════════════════════════════════════════════════════════════════════
 
+_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?>")
 _JUNK_RE = re.compile(
     r"\b(s\d{1,2}e?\d{0,3}|season\s*\d+|ep(?:isode)?\.?\s*\d+|\d{3,4}p|4k|uhd|hdr\d*|"
     r"bluray|bdrip|remux|web-?dl|webrip|hdrip|dvdrip|hdtv|cam|hdts|ts|"
@@ -294,7 +295,12 @@ _TITLE_SPACE_RE = re.compile(r"\s{2,}")
 
 
 def clean_title(text: str) -> str:
-    t = _YEAR_PATTERN.sub(" ", text)
+    # Captions are stored via Telegram's HTML rendering (message.caption.html),
+    # so a bold/italic-formatted title arrives as literal "<b>Title</b>" —
+    # strip that first, or a formatted caption's title never matches an
+    # unformatted query, which used to make Stage 1 miss almost everything.
+    t = _HTML_TAG_RE.sub(" ", text)
+    t = _YEAR_PATTERN.sub(" ", t)
     t = _JUNK_RE.sub(" ", t)
     t = _TITLE_PUNCT_RE.sub(" ", t)
     return _TITLE_SPACE_RE.sub(" ", t).strip()
