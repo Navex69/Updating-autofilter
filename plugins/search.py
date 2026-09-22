@@ -13,13 +13,14 @@ from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE
 from database.filters_db import search_files, display_name, extract_meta, apply_filters
 from database.settings_db import get_settings
 from poster import fetch_poster
-from spellcheck import fuzzy_correct, ai_correct
+from spellcheck import fuzzy_correct, suggest_titles
 from utils import temp, human_size
 from strings import (
     NOT_FOUND_TXT, RESULT_HEADER_TXT, RESULT_HEADER_CORRECTED_TXT, POSTER_CAPTION_TXT,
     SEARCH_EXPIRED_TXT, QUERY_AUTODELETE_NOTE, FILTER_LABELS, FILTER_MENU_TXT,
     FILTER_CLEAR_BTN, HOME_BTN, NO_MATCH_TXT,
     STATUS_STAGE1_TXT, STATUS_STAGE2_TXT, STATUS_STAGE3_TXT,
+    SUGGESTIONS_HEADER_TXT, SUGGESTION_NOT_FOUND_TXT,
 )
 
 TEXT_LIMIT = 4096  # Telegram's hard cap for a plain message — defensive only,
@@ -101,6 +102,41 @@ def _fit_text(text: str, limit: int = TEXT_LIMIT) -> str:
 
 def _chunk(items: list, size: int) -> list:
     return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage-3 suggestion cache — short-lived, keyed the same way as the result
+# cache. Buttons only ever carry an index into this list (never the title
+# text itself, which could blow past Telegram's callback_data limit), so a
+# click just looks up "which title was button N" and searches that.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_SUGGESTION_CACHE: dict = {}
+
+
+def _suggestion_cache_put(key: str, titles: list):
+    if len(_SUGGESTION_CACHE) >= _CACHE_MAX_ENTRIES:
+        oldest = min(_SUGGESTION_CACHE, key=lambda k: _SUGGESTION_CACHE[k]["time"])
+        _SUGGESTION_CACHE.pop(oldest, None)
+    _SUGGESTION_CACHE[key] = {"titles": titles, "time": time.time()}
+
+
+def _suggestion_cache_get(key: str) -> list | None:
+    entry = _SUGGESTION_CACHE.get(key)
+    if not entry:
+        return None
+    if time.time() - entry["time"] > _CACHE_TTL:
+        _SUGGESTION_CACHE.pop(key, None)
+        return None
+    return entry["titles"]
+
+
+def _suggestion_keyboard(key: str, titles: list) -> InlineKeyboardMarkup:
+    rows = []
+    for i, title in enumerate(titles):
+        label = title if len(title) <= 60 else title[:57] + "…"
+        rows.append([InlineKeyboardButton(label, callback_data=f"sug#{key}#{i}")])
+    return InlineKeyboardMarkup(rows)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -263,11 +299,48 @@ async def _schedule_delete(message, seconds: int):
         pass
 
 
-async def _status_update(message, text: str):
+async def _status_update(message, text: str, markup=None):
     try:
-        return await message.edit_text(text, disable_web_page_preview=True)
+        return await message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
     except RPCError:
         return message
+
+
+async def _deliver_results(message, resolved_query: str, results: list,
+                            original_query: str | None = None, poster=None):
+    """Send the poster (if found) + the results/filter message — the exact
+    same flow whether Stage 1 found it directly or the user just clicked a
+    Stage-3 suggestion button."""
+    if poster is None:
+        poster = await fetch_poster(resolved_query)
+
+    settings = await get_settings()
+    mode = settings["result_mode"]
+    key = _cache_key(resolved_query)
+    entry = _cache_put(key, resolved_query, results, mode, poster, original_query)
+
+    text, markup = _render(key, entry, offset=0)
+    if settings["query_autodelete_enabled"]:
+        text += QUERY_AUTODELETE_NOTE.format(seconds=settings["query_autodelete_seconds"])
+
+    to_delete = []
+    if poster:
+        poster_msg = await message.reply_photo(
+            poster["url"],
+            caption=POSTER_CAPTION_TXT.format(query=html.escape(resolved_query)),
+            quote=True,
+        )
+        to_delete.append(poster_msg)
+        sent = await message.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
+    else:
+        sent = await message.reply_text(
+            text, reply_markup=markup, quote=True, disable_web_page_preview=True,
+        )
+    to_delete.append(sent)
+
+    if settings["query_autodelete_enabled"]:
+        for m in to_delete:
+            asyncio.create_task(_schedule_delete(m, settings["query_autodelete_seconds"]))
 
 
 @Client.on_message(search_filter)
@@ -288,76 +361,44 @@ async def handle_search(_, message):
     )
     status = await status_task
 
-    resolved_query = query
-    original_query = None
-
-    if not results:
-        # Stage 2 — fuzzy match against your own DB's titles. Free,
-        # in-memory, a few milliseconds. Catches ordinary typos without
-        # ever cross-matching a different-but-similar-looking title (word
-        # count must match and every word must score high individually).
-        status = await _status_update(status, STATUS_STAGE2_TXT)
-
-        hit = await fuzzy_correct(query)
-        if hit:
-            resolved_query, results = hit
-            original_query = query
-        else:
-            status = await _status_update(status, STATUS_STAGE3_TXT)
-
-            # Stage 3 — Groq + Gemini race, each guess re-verified against
-            # the real database before it's trusted. Only reached when
-            # Stage 1 AND Stage 2 both found nothing.
-            hit = await ai_correct(query)
-            if hit:
-                resolved_query, results = hit
-                original_query = query
-
-        if results and not poster:
-            # The original query's poster lookup was based on a misspelled
-            # title and likely came back empty — retry with the corrected
-            # one now that we actually know it.
-            poster = await fetch_poster(resolved_query)
-
-    if not results:
-        await _status_update(status, NOT_FOUND_TXT.format(query=html.escape(query)))
+    if results:
+        # Stage 1 already found it — the common, fast path.
+        await _deliver_results(message, query, results, poster=poster)
+        asyncio.create_task(_schedule_delete(status, 0))
         return
 
-    settings = await get_settings()
-    mode = settings["result_mode"]
-    key = _cache_key(resolved_query)
-    entry = _cache_put(key, resolved_query, results, mode, poster, original_query)
+    # Stage 2 — fuzzy match against your own DB's titles. Free, in-memory,
+    # a few milliseconds. Catches ordinary typos without ever cross-
+    # matching a different-but-similar-looking title (word count must
+    # match and every word must score high individually).
+    status = await _status_update(status, STATUS_STAGE2_TXT)
 
-    text, markup = _render(key, entry, offset=0)
-    if settings["query_autodelete_enabled"]:
-        text += QUERY_AUTODELETE_NOTE.format(seconds=settings["query_autodelete_seconds"])
+    hit = await fuzzy_correct(query)
+    if hit:
+        resolved_query, results = hit
+        # The original query's poster lookup was based on a misspelled
+        # title and likely came back empty — retry with the corrected one.
+        poster = poster or await fetch_poster(resolved_query)
+        await _deliver_results(message, resolved_query, results, original_query=query, poster=poster)
+        asyncio.create_task(_schedule_delete(status, 0))
+        return
 
-    to_delete = []
+    # Stage 3 — TMDB/OMDb are searched first (every result they return is
+    # a real, catalogued title); Groq + Gemini only run as a last resort if
+    # both come back empty. Either way this only ever produces a list of
+    # candidate titles to show as buttons — nothing is searched in your
+    # database, and nothing is shown as a result, until the user actually
+    # taps one.
+    status = await _status_update(status, STATUS_STAGE3_TXT)
+    suggestions = await suggest_titles(query)
+    if suggestions:
+        key = _cache_key(query)
+        _suggestion_cache_put(key, suggestions)
+        markup = _suggestion_keyboard(key, suggestions)
+        await _status_update(status, SUGGESTIONS_HEADER_TXT.format(query=html.escape(query)), markup)
+        return
 
-    # The poster is a short, static, always-safe caption — it never carries
-    # the growing file list, so it can never hit Telegram's 1024-char photo
-    # caption limit no matter how long/many the results are.
-    if poster:
-        poster_msg = await message.reply_photo(
-            poster["url"],
-            caption=POSTER_CAPTION_TXT.format(query=html.escape(resolved_query)),
-            quote=True,
-        )
-        to_delete.append(poster_msg)
-        sent = await message.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
-    else:
-        sent = await message.reply_text(
-            text, reply_markup=markup, quote=True, disable_web_page_preview=True,
-        )
-    to_delete.append(sent)
-
-    # The stage-progress message has done its job now that the real result
-    # message(s) are in the chat — clear it without making the user wait.
-    asyncio.create_task(_schedule_delete(status, 0))
-
-    if settings["query_autodelete_enabled"]:
-        for m in to_delete:
-            asyncio.create_task(_schedule_delete(m, settings["query_autodelete_seconds"]))
+    await _status_update(status, NOT_FOUND_TXT.format(query=html.escape(query)))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -429,3 +470,22 @@ async def reset_home(_, query):
     entry["filters"] = dict(_EMPTY_FILTERS)
     text, markup = _render(key, entry, offset=0)
     await _push(query.message, text, markup)
+
+
+@Client.on_callback_query(filters.regex(r"^sug#"))
+async def suggestion_clicked(_, query):
+    _, key, idx = query.data.split("#")
+    titles = _suggestion_cache_get(key)
+    await query.answer()
+    if not titles or int(idx) >= len(titles):
+        await _expired(query.message)
+        return
+
+    title = titles[int(idx)]
+    results = await search_files(title)
+    if not results:
+        await query.message.edit_text(SUGGESTION_NOT_FOUND_TXT.format(title=html.escape(title)))
+        return
+
+    await _deliver_results(query.message, title, results)
+    asyncio.create_task(_schedule_delete(query.message, 0))
