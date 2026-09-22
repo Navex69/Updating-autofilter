@@ -9,17 +9,17 @@ and accuracy are completely unaffected):
   Stage 2 (fuzzy_correct)      — compares the query against a cache of
       titles already in your own database. Free, in-memory, no network
       call, a few milliseconds. Catches ordinary typos.
-  Stage 3 (ai_correct)         — Groq and Gemini are asked in parallel to
-      guess the intended title. Neither guess is ever trusted directly:
-      whichever answers first has its guess verified against the real
-      database immediately. A genuine hit cancels the other request right
-      away (saves time and quota) and is returned. A blank guess is
-      discarded and the next response is tried instead. If nothing ever
-      verifies, the fallback reports no match — an AI can never cause a
-      wrong or made-up file to be shown as if it were real.
+  Stage 3 (suggest_titles)     — TMDB and OMDb are searched first (every
+      result they return is a real, catalogued title — zero hallucination
+      risk); Groq and Gemini are only asked, in full, as a fallback if
+      TMDB+OMDb together find nothing. Returns a list of candidate titles
+      for the user to pick from as buttons — it never auto-applies one or
+      shows a result directly. A click on a suggestion is what actually
+      searches your database; if that title isn't in it, the user just
+      sees "not found" for that pick.
 
-Both stages return (title, results) so the caller never re-runs the same
-database search twice.
+fuzzy_correct() returns (title, results) — it's still an auto-apply stage,
+unchanged. suggest_titles() returns a plain list of title strings.
 """
 import asyncio
 import logging
@@ -31,7 +31,7 @@ from rapidfuzz.distance import DamerauLevenshtein
 
 from config import (
     GROQ_API_KEY, GROQ_MODEL, GEMINI_API_KEY, GEMINI_MODEL,
-    AI_FETCH_TIMEOUT, FUZZY_MATCH_THRESHOLD,
+    TMDB_API_KEY, OMDB_API_KEY, AI_FETCH_TIMEOUT, FUZZY_MATCH_THRESHOLD,
 )
 from database.filters_db import files, search_files, clean_title, display_name
 
@@ -174,31 +174,94 @@ async def fuzzy_correct(query: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Stage 3 — AI correction (Groq + Gemini racing, DB-verified)
+# Stage 3 — suggestion titles (TMDB -> OMDb -> AI list, in that order)
+# Only reached when Stage 1 AND Stage 2 both found nothing. TMDB and OMDb
+# are tried first because every result they return is a real, catalogued
+# title — zero hallucination risk. Groq and Gemini (both, in full — not
+# raced) are only asked if TMDB+OMDb together come back completely empty,
+# as a safety net for obscure/regional titles neither catalog covers well.
+# Nothing here ever touches your own database — the caller turns the
+# returned titles into buttons, and only a click actually searches it.
 # ══════════════════════════════════════════════════════════════════════════════
 
-_AI_PROMPT = (
-    "You correct misspelled movie/TV/anime search queries for a file "
-    "search engine. The user typed: \"{query}\". Reply with ONLY the "
-    "corrected, most likely real title — no year, no explanation, no "
-    "punctuation beyond what belongs in the title itself. "
-    "Only fix spelling — if the query names a specific numbered sequel, "
-    "season, or part (e.g. ends in \"2\", \"Part 3\", \"Chapter 1\"), your "
-    "answer MUST keep that exact same number; never substitute a "
-    "different or more familiar entry in the series. If you cannot "
-    "confidently identify a real, existing movie/TV/anime title, reply "
-    "with exactly: NONE"
+_MAX_SUGGESTIONS = 8
+
+
+async def _tmdb_suggestions(query: str) -> list:
+    if not TMDB_API_KEY:
+        return []
+    params = {"api_key": TMDB_API_KEY, "query": query, "include_adult": "false"}
+    timeout = aiohttp.ClientTimeout(total=AI_FETCH_TIMEOUT)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get("https://api.themoviedb.org/3/search/multi", params=params) as r:
+                if r.status != 200:
+                    return []
+                data = await r.json()
+    except Exception:
+        logger.debug("TMDB suggestions failed", exc_info=True)
+        return []
+    titles = []
+    for item in data.get("results", []):
+        if item.get("media_type") not in ("movie", "tv"):
+            continue
+        title = item.get("title") or item.get("name")
+        if title:
+            titles.append(title)
+    return titles
+
+
+async def _omdb_suggestions(query: str) -> list:
+    if not OMDB_API_KEY:
+        return []
+    params = {"apikey": OMDB_API_KEY, "s": query}
+    timeout = aiohttp.ClientTimeout(total=AI_FETCH_TIMEOUT)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get("http://www.omdbapi.com/", params=params) as r:
+                if r.status != 200:
+                    return []
+                data = await r.json(content_type=None)
+    except Exception:
+        logger.debug("OMDb suggestions failed", exc_info=True)
+        return []
+    if data.get("Response") != "True":
+        return []
+    return [item["Title"] for item in data.get("Search", []) if item.get("Title")]
+
+
+_AI_LIST_PROMPT = (
+    "You suggest possible real movie/TV/anime titles for a misspelled or "
+    "unclear search query on a file search engine. The user typed: "
+    "\"{query}\". Reply with up to 5 real, existing titles this could be, "
+    "one per line, nothing else — no numbering, no explanation, no year. "
+    "Only fix spelling or minor wording — if the query names a specific "
+    "numbered sequel, season, or part (e.g. ends in \"2\", \"Part 3\"), "
+    "every title you suggest MUST keep that exact same number; never "
+    "substitute a different entry in the series. If you cannot think of "
+    "any real matching title, reply with exactly: NONE"
 )
 
 
-async def _groq_guess(query: str) -> str | None:
+def _parse_title_lines(text: str) -> list:
+    if text.strip().upper().strip(". ") == "NONE":
+        return []
+    titles = []
+    for line in text.splitlines():
+        line = line.strip().lstrip("-•*0123456789.) ").strip()
+        if line and line.upper() != "NONE":
+            titles.append(line)
+    return titles
+
+
+async def _groq_suggestions(query: str) -> list:
     if not GROQ_API_KEY:
-        return None
+        return []
     payload = {
         "model": GROQ_MODEL,
-        "messages": [{"role": "user", "content": _AI_PROMPT.format(query=query)}],
-        "temperature": 0,
-        "max_tokens": 20,
+        "messages": [{"role": "user", "content": _AI_LIST_PROMPT.format(query=query)}],
+        "temperature": 0.3,
+        "max_tokens": 120,
     }
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
     timeout = aiohttp.ClientTimeout(total=AI_FETCH_TIMEOUT)
@@ -209,22 +272,21 @@ async def _groq_guess(query: str) -> str | None:
                 json=payload, headers=headers,
             ) as r:
                 if r.status != 200:
-                    logger.debug("Groq guess HTTP %s", r.status)
-                    return None
+                    return []
                 data = await r.json()
         text = data["choices"][0]["message"]["content"].strip()
     except Exception:
-        logger.debug("Groq guess failed", exc_info=True)
-        return None
-    return None if text.upper().strip(". ") == "NONE" else text
+        logger.debug("Groq suggestions failed", exc_info=True)
+        return []
+    return _parse_title_lines(text)
 
 
-async def _gemini_guess(query: str) -> str | None:
+async def _gemini_suggestions(query: str) -> list:
     if not GEMINI_API_KEY:
-        return None
+        return []
     payload = {
-        "contents": [{"parts": [{"text": _AI_PROMPT.format(query=query)}]}],
-        "generationConfig": {"temperature": 0, "maxOutputTokens": 20},
+        "contents": [{"parts": [{"text": _AI_LIST_PROMPT.format(query=query)}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 150},
     }
     headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
@@ -233,56 +295,65 @@ async def _gemini_guess(query: str) -> str | None:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, json=payload, headers=headers) as r:
                 if r.status != 200:
-                    logger.debug("Gemini guess HTTP %s", r.status)
-                    return None
+                    return []
                 data = await r.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception:
-        logger.debug("Gemini guess failed", exc_info=True)
-        return None
-    return None if text.upper().strip(". ") == "NONE" else text
+        logger.debug("Gemini suggestions failed", exc_info=True)
+        return []
+    return _parse_title_lines(text)
 
 
-async def ai_correct(query: str):
+def _merge_titles(*title_lists) -> list:
+    """Dedupe by cleaned title (so 'The Boy (2016)' and 'the boy' collapse
+    into one), keeping the first-seen display form and preserving source
+    priority — earlier lists in the arguments win the display spelling."""
+    seen = set()
+    merged = []
+    for titles in title_lists:
+        for title in titles:
+            key = clean_title(title).lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(title)
+    return merged
+
+
+def _same_series_wrong_number(query: str, candidate: str) -> bool:
     """
-    Races Groq and Gemini. Whichever responds first has its guess verified
-    against the real database immediately — a genuine hit cancels the
-    other request and is returned right away; a blank guess is discarded
-    and the next response (if any) is tried instead.
-    Returns (title, results) or None — never a raw, unverified AI guess.
+    True only when `candidate` is the SAME base title as `query` but with a
+    different trailing sequel/season/part number — e.g. query "Weak Hero
+    Class 2" vs candidate "Weak Hero Class 1". A completely different title
+    that simply happens to also end in a digit ("Kaithi 2") is never
+    touched by this — only an actual same-series mismatch is rejected.
     """
-    tasks = {}
-    if GROQ_API_KEY:
-        tasks["groq"] = asyncio.create_task(_groq_guess(query))
-    if GEMINI_API_KEY:
-        tasks["gemini"] = asyncio.create_task(_gemini_guess(query))
-    if not tasks:
-        return None
+    q_num = _trailing_number(query)
+    if q_num is None:
+        return False
+    q_base = re.sub(r"\s*\d{1,3}\s*$", "", clean_title(query)).lower()
+    if not q_base:
+        return False
+    c_base = re.sub(r"\s*\d{1,3}\s*$", "", clean_title(candidate)).lower()
+    c_num = _trailing_number(candidate)
+    return c_base == q_base and c_num != q_num
 
-    task_names = {t: n for n, t in tasks.items()}
-    pending = set(tasks.values())
-    try:
-        while pending:
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            for finished in done:
-                name = task_names[finished]
-                try:
-                    guess = finished.result()
-                except Exception:
-                    guess = None
-                if not guess:
-                    continue
-                if not _sequel_number_preserved(query, guess):
-                    logger.info("AI guess %r rejected — changed sequel number in %r", guess, query)
-                    continue
-                results = await search_files(guess)
-                if results:
-                    logger.info("AI correction via %s: %r -> %r", name, query, guess)
-                    for t in pending:
-                        t.cancel()
-                    return guess, results
-        return None
-    finally:
-        for t in pending:
-            if not t.done():
-                t.cancel()
+
+async def suggest_titles(query: str) -> list:
+    """
+    Returns up to 8 candidate titles for the caller to present as buttons.
+    Never returns more than one entry for the same underlying title, and
+    never suggests the same series with a different sequel/season number
+    than the one the query explicitly named.
+    """
+    tmdb, omdb = await asyncio.gather(_tmdb_suggestions(query), _omdb_suggestions(query))
+    merged = _merge_titles(tmdb, omdb)
+
+    if not merged:
+        groq_list, gemini_list = await asyncio.gather(
+            _groq_suggestions(query), _gemini_suggestions(query),
+        )
+        merged = _merge_titles(groq_list, gemini_list)
+
+    merged = [t for t in merged if not _same_series_wrong_number(query, t)]
+    return merged[:_MAX_SUGGESTIONS]
