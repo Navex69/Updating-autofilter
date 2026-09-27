@@ -1,0 +1,7 @@
+pyrofork==2.3.45
+tgcrypto
+motor==3.7.1
+aiohttp
+python-dotenv
+shortzy
+rapidfuzz
