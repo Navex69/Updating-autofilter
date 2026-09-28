@@ -74,11 +74,11 @@ class Bot(Client):
             if not isinstance(admin_id, int):
                 continue
             try:
-                # First try to get the user to ensure bot has "met" them
-                await self.get_users(admin_id)
                 await self.set_bot_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=admin_id))
+            except PeerIdInvalid:
+                logger.info("Admin %s hasn't started the bot yet, skipping admin commands", admin_id)
             except Exception:
-                logger.warning("Couldn't set the admin command menu for %s (user may not have started the bot yet)", admin_id, exc_info=True)
+                logger.warning("Couldn't set the admin command menu for %s", admin_id, exc_info=True)
 
     async def stop(self, *args):
         await super().stop()
