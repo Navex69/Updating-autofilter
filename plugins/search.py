@@ -9,7 +9,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE, REQUEST_CHANNEL, ADMINS, SUGGESTION_TIMEOUT
+from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE, REQUEST_CHANNEL, ADMINS, SUGGESTION_TIMEOUT, NOT_FOUND_FILE_CHANNEL
 from database.filters_db import search_files, display_name, extract_meta, apply_filters
 from database.settings_db import get_settings
 from poster import fetch_poster
@@ -142,27 +142,26 @@ def _suggestion_keyboard(key: str, titles: list) -> InlineKeyboardMarkup:
 
 
 async def _schedule_auto_request(bot, status_message, query: str, user_id: int):
-    """Schedule an auto-request after timeout if user doesn't interact."""
+    """Schedule a file not found notification after timeout if user doesn't interact."""
     await asyncio.sleep(SUGGESTION_TIMEOUT)
     
     # Check if the message is still tracked (user hasn't clicked anything)
     tracker = _SUGGESTION_TRACKER.get(status_message.id)
     if tracker and not tracker["clicked"]:
-        from plugins.request import send_request
-        
-        try:
-            # Get the actual user info from the bot
-            user = await bot.get_users(user_id)
-            username = user.username or user.first_name
-            await send_request(
-                bot,
-                user_id=user_id,
-                query=query,
-                username=username,
-                origin_message=None  # No origin message for auto-request
-            )
-        except Exception:
-            pass  # Fail silently if user can't be fetched
+        if NOT_FOUND_FILE_CHANNEL and user_id not in ADMINS:
+            try:
+                # Get the actual user info from the bot
+                user = await bot.get_users(user_id)
+                mention = f"<a href='tg://user?id={user_id}'>{user.first_name}</a>"
+                text = (
+                    "<b>#FILE_NOT_FOUND</b>\n\n"
+                    f"👤 User: {mention}\n"
+                    f"🆔 ID: <code>{user_id}</code>\n"
+                    f"🔍 Query: <code>{query}</code>"
+                )
+                await bot.send_message(chat_id=NOT_FOUND_FILE_CHANNEL, text=text)
+            except Exception:
+                pass  # Fail silently if user can't be fetched or message fails
     
     # Clean up tracker
     _SUGGESTION_TRACKER.pop(status_message.id, None)
@@ -424,25 +423,37 @@ async def handle_search(bot, message):
         key = _cache_key(query)
         _suggestion_cache_put(key, suggestions)
         markup = _suggestion_keyboard(key, suggestions)
-        # Add request button to suggestions
-        if REQUEST_CHANNEL and message.from_user.id not in ADMINS:
-            markup.inline_keyboard.append([InlineKeyboardButton(
-                REQUEST_BTN_TXT,
-                callback_data=f"req#{query}#{message.from_user.id}"
-            )])
-        
+    else:
+        markup = InlineKeyboardMarkup([])
+    
+    # Always add Google search and request buttons at the bottom
+    google_query = query.replace(' ', '+')
+    markup.inline_keyboard.append([InlineKeyboardButton(
+        "🔍 Search on Google",
+        url=f"https://www.google.com/search?q={google_query}"
+    )])
+    
+    if REQUEST_CHANNEL and message.from_user.id not in ADMINS:
+        markup.inline_keyboard.append([InlineKeyboardButton(
+            REQUEST_BTN_TXT,
+            callback_data=f"req#{query}#{message.from_user.id}"
+        )])
+    
+    if suggestions:
         await _status_update(status, SUGGESTIONS_HEADER_TXT.format(query=html.escape(query)), markup)
-        
-        # Track for auto-request timeout
-        if REQUEST_CHANNEL and message.from_user.id not in ADMINS:
-            _SUGGESTION_TRACKER[status.id] = {
-                "clicked": False,
-                "query": query,
-                "user_id": message.from_user.id
-            }
-            asyncio.create_task(_schedule_auto_request(bot, status, query, message.from_user.id))
-        
-        return
+    else:
+        await _status_update(status, NOT_FOUND_TXT.format(query=html.escape(query)), markup)
+    
+    # Track for auto-request timeout
+    if REQUEST_CHANNEL and message.from_user.id not in ADMINS:
+        _SUGGESTION_TRACKER[status.id] = {
+            "clicked": False,
+            "query": query,
+            "user_id": message.from_user.id
+        }
+        asyncio.create_task(_schedule_auto_request(bot, status, query, message.from_user.id))
+    
+    return
 
     # No suggestions found - show not found with request button
     not_found_text = NOT_FOUND_TXT.format(query=html.escape(query))
@@ -559,6 +570,9 @@ async def request_button_clicked(bot, query):
     if query.from_user.id != user_id:
         await query.answer("⚠️ This is not your request!", show_alert=True)
         return
+    
+    # Mark as clicked to prevent auto-request
+    _SUGGESTION_TRACKER.pop(query.message.id, None)
     
     if not REQUEST_CHANNEL:
         await query.answer(REQUEST_NOT_CONFIGURED_TXT, show_alert=True)

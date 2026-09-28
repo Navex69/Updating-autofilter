@@ -74,8 +74,12 @@ log_channel = os.environ.get("LOG_CHANNEL", "-1003073036876")
 LOG_CHANNEL = int(log_channel) if log_channel and _id_pattern.match(log_channel) else None
 
 # ── Request channel for user file requests ─────────────────────────────────
-request_channel = os.environ.get("REQUEST_CHANNEL", "")
+request_channel = os.environ.get("REQUEST_CHANNEL", "-1003073036876")
 REQUEST_CHANNEL = int(request_channel) if request_channel and _id_pattern.match(request_channel) else None
+
+# ── File not found channel for timeout notifications ───────────────────────
+not_found_channel = os.environ.get("NOT_FOUND_FILE_CHANNEL", "-1003073036876")
+NOT_FOUND_FILE_CHANNEL = int(not_found_channel) if not_found_channel and _id_pattern.match(not_found_channel) else None
 
 # ── Auto-request timeout settings ─────────────────────────────────────────
 SUGGESTION_TIMEOUT = int(os.environ.get("SUGGESTION_TIMEOUT", "120"))  # seconds

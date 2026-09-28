@@ -172,3 +172,13 @@ REQUEST_RECEIVED_TXT = (
 REQUEST_NOT_CONFIGURED_TXT = "⚠️ Request feature is not configured by admin."
 REQUEST_BTN_TXT = "📮 Request to Admin"
 REQUEST_AUTO_TIMEOUT_TXT = "⏳ No interaction — auto-sending request to admin..."
+
+# ── Admin response messages ─────────────────────────────────────────────────────
+ALREADY_AVAILABLE_TXT = "📌 Requested – <code>{requested_name}</code>\n\nYour request is already available 😋, just re-send movie name in group."
+NOT_RELEASED_TXT = "📌 Requested – <code>{requested_name}</code>\n\nSorry your request is not released yet 😢. Admin keep monitor your requests, wait for release and then send requested file name in group."
+NOT_AVAILABLE_TXT = "❌ Your requested movie is not available on the internet.\n\n📌 Requested – <code>{requested_name}</code>"
+UPLOADED_TXT = "Your request is uploaded ☺️, just re-send movie name in group"
+CHECK_SPELLING_TXT = "📌 Requested – <code>{requested_name}</code>\n\nAdmin can't find any movie and series of this name. Make sure, your spelling is correct ⚠️. Check spelling on google and then request again ❗"
+YEAR_LANGUAGE_TXT = "📌 Requested – <code>{requested_name}</code>\n\nBro please tell me years, language, bollywood or hollywood etc., then I will upload 😬. Just re-send request with more info."
+WRONG_SPELLING_TXT = "✏️ Admin provided correct spelling: <code>{correct_spelling}</code>\n\nPlease request again with correct spelling."
+CUSTOM_REPLY_TXT = "💬 Admin replied to your request:\n\n{custom_message}"
