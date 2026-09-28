@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import html
+import logging
 import math
 import re
 import time
@@ -23,6 +24,8 @@ from strings import (
     SUGGESTIONS_HEADER_TXT, SUGGESTION_NOT_FOUND_TXT,
     REQUEST_BTN_TXT, REQUEST_NOT_CONFIGURED_TXT, REQUEST_SENT_TXT,
 )
+
+logger = logging.getLogger(__name__)
 
 TEXT_LIMIT = 4096  # Telegram's hard cap for a plain message — defensive only,
                     # real per-file entries are a few hundred chars at most so
@@ -373,6 +376,7 @@ async def _deliver_results(message, resolved_query: str, results: list,
 
 @Client.on_message(search_filter)
 async def handle_search(bot, message):
+    logger.info("Search triggered by user %s: %s", message.from_user.id if message.from_user else "unknown", message.text[:50])
     query = message.text.strip()
     if not query:
         return
@@ -454,17 +458,6 @@ async def handle_search(bot, message):
         asyncio.create_task(_schedule_auto_request(bot, status, query, message.from_user.id))
     
     return
-
-    # No suggestions found - show not found with request button
-    not_found_text = NOT_FOUND_TXT.format(query=html.escape(query))
-    if REQUEST_CHANNEL and message.from_user.id not in ADMINS:
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton(
-            REQUEST_BTN_TXT,
-            callback_data=f"req#{query}#{message.from_user.id}"
-        )]])
-        await _status_update(status, not_found_text, markup)
-    else:
-        await _status_update(status, not_found_text)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

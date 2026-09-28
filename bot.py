@@ -54,6 +54,9 @@ class Bot(Client):
         temp.BOT = self
         temp.U_NAME = me.username
 
+        logger.info("Bot configuration - API_ID: %s, ADMINS: %s", API_ID, ADMINS)
+        logger.info("Bot started as @%s (ID: %s)", me.username, me.id)
+
         await self._setup_commands()
 
         runner = web.AppRunner(web_app)
