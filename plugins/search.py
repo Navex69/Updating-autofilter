@@ -117,6 +117,32 @@ def _chunk(items: list, size: int) -> list:
 
 _SUGGESTION_CACHE: dict = {}
 _SUGGESTION_TRACKER: dict = {}  # Track suggestion messages for auto-request timeout
+_REQUEST_QUERIES: dict = {}     # short key -> original query (callback_data is capped at 64 bytes)
+_BG_TASKS: set = set()          # keep strong refs so background tasks aren't garbage-collected
+
+
+def _spawn(coro):
+    task = asyncio.create_task(coro)
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+    return task
+
+
+def _request_query_put(query: str) -> str:
+    if len(_REQUEST_QUERIES) >= _CACHE_MAX_ENTRIES:
+        oldest = min(_REQUEST_QUERIES, key=lambda k: _REQUEST_QUERIES[k][1])
+        _REQUEST_QUERIES.pop(oldest, None)
+    key = _cache_key(query)
+    _REQUEST_QUERIES[key] = (query, time.time())
+    return key
+
+
+def _request_query_get(key: str) -> str | None:
+    entry = _REQUEST_QUERIES.get(key)
+    if not entry or time.time() - entry[1] > 3600:
+        _REQUEST_QUERIES.pop(key, None)
+        return None
+    return entry[0]
 
 
 def _suggestion_cache_put(key: str, titles: list):
@@ -155,12 +181,12 @@ async def _schedule_auto_request(bot, status_message, query: str, user_id: int):
             try:
                 # Get the actual user info from the bot
                 user = await bot.get_users(user_id)
-                mention = f"<a href='tg://user?id={user_id}'>{user.first_name}</a>"
+                mention = f"<a href='tg://user?id={user_id}'>{html.escape(user.first_name or str(user_id))}</a>"
                 text = (
                     "<b>#FILE_NOT_FOUND</b>\n\n"
                     f"👤 User: {mention}\n"
                     f"🆔 ID: <code>{user_id}</code>\n"
-                    f"🔍 Query: <code>{query}</code>"
+                    f"🔍 Query: <code>{html.escape(query)}</code>"
                 )
                 await bot.send_message(chat_id=NOT_FOUND_FILE_CHANNEL, text=text)
             except Exception:
@@ -371,7 +397,7 @@ async def _deliver_results(message, resolved_query: str, results: list,
 
     if settings["query_autodelete_enabled"]:
         for m in to_delete:
-            asyncio.create_task(_schedule_delete(m, settings["query_autodelete_seconds"]))
+            _spawn(_schedule_delete(m, settings["query_autodelete_seconds"]))
 
 
 @Client.on_message(search_filter)
@@ -396,7 +422,7 @@ async def handle_search(bot, message):
     if results:
         # Stage 1 already found it — the common, fast path.
         await _deliver_results(message, query, results, poster=poster)
-        asyncio.create_task(_schedule_delete(status, 0))
+        _spawn(_schedule_delete(status, 0))
         return
 
     # Stage 2 — fuzzy match against your own DB's titles. Free, in-memory,
@@ -412,7 +438,7 @@ async def handle_search(bot, message):
         # title and likely came back empty — retry with the corrected one.
         poster = poster or await fetch_poster(resolved_query)
         await _deliver_results(message, resolved_query, results, original_query=query, poster=poster)
-        asyncio.create_task(_schedule_delete(status, 0))
+        _spawn(_schedule_delete(status, 0))
         return
 
     # Stage 3 — TMDB/OMDb are searched first (every result they return is
@@ -437,26 +463,29 @@ async def handle_search(bot, message):
         url=f"https://www.google.com/search?q={google_query}"
     )])
     
-    if REQUEST_CHANNEL and message.from_user.id not in ADMINS:
+    user = message.from_user
+    can_request = bool(user) and user.id not in ADMINS
+
+    if REQUEST_CHANNEL and can_request:
         markup.inline_keyboard.append([InlineKeyboardButton(
             REQUEST_BTN_TXT,
-            callback_data=f"req#{query}#{message.from_user.id}"
+            callback_data=f"req#{_request_query_put(query)}#{user.id}"
         )])
-    
+
     if suggestions:
         await _status_update(status, SUGGESTIONS_HEADER_TXT.format(query=html.escape(query)), markup)
     else:
         await _status_update(status, NOT_FOUND_TXT.format(query=html.escape(query)), markup)
-    
-    # Track for auto-request timeout
-    if REQUEST_CHANNEL and message.from_user.id not in ADMINS:
+
+    # Track for the "file not found" timeout notification
+    if NOT_FOUND_FILE_CHANNEL and can_request:
         _SUGGESTION_TRACKER[status.id] = {
             "clicked": False,
             "query": query,
-            "user_id": message.from_user.id
+            "user_id": user.id
         }
-        asyncio.create_task(_schedule_auto_request(bot, status, query, message.from_user.id))
-    
+        _spawn(_schedule_auto_request(bot, status, query, user.id))
+
     return
 
 
@@ -550,47 +579,61 @@ async def suggestion_clicked(_, query):
         return
 
     await _deliver_results(query.message, title, results)
-    asyncio.create_task(_schedule_delete(query.message, 0))
+    _spawn(_schedule_delete(query.message, 0))
 
 
 @Client.on_callback_query(filters.regex(r"^req#"))
 async def request_button_clicked(bot, query):
     """Handle the request button click."""
-    _, search_query, user_id = query.data.split("#")
+    _, key, user_id = query.data.split("#")
     user_id = int(user_id)
-    
-    # Only allow the user who clicked to trigger their own request
+
+    # Only allow the user who searched to trigger their own request
     if query.from_user.id != user_id:
         await query.answer("⚠️ This is not your request!", show_alert=True)
         return
-    
-    # Mark as clicked to prevent auto-request
-    _SUGGESTION_TRACKER.pop(query.message.id, None)
-    
+
     if not REQUEST_CHANNEL:
         await query.answer(REQUEST_NOT_CONFIGURED_TXT, show_alert=True)
         return
-    
-    await query.answer("📮 Sending request to admin...")
-    
+
+    search_query = _request_query_get(key)
+    if not search_query:
+        await query.answer()
+        await _expired(query.message)
+        return
+
+    # Mark as handled so the timeout doesn't also fire a #FILE_NOT_FOUND
+    _SUGGESTION_TRACKER.pop(query.message.id, None)
+
     # Import here to avoid circular dependency
-    from plugins.request import send_request
-    
+    from plugins.request import send_request, is_duplicate_request
+
+    if is_duplicate_request(user_id, search_query):
+        await query.answer("📮 You already requested this — please wait for the admins.", show_alert=True)
+        return
+
+    await query.answer("📮 Sending request to admin...")
+
     username = query.from_user.username or query.from_user.first_name
     sent = await send_request(
         bot,
         user_id=user_id,
         query=search_query,
         username=username,
-        origin_message=query.message
+        origin_message=query.message.reply_to_message or query.message,
     )
-    
+
     if sent:
+        try:
+            link = sent.link
+        except Exception:
+            link = None
         await query.message.edit_text(
             REQUEST_SENT_TXT.format(query=html.escape(search_query)),
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✨ View Your Request ✨", url=sent.link)]
-            ])
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("✨ View Your Request ✨", url=link)]]
+            ) if link else None,
         )
     else:
         await query.message.edit_text("❌ Failed to send request. Please try again later.")
