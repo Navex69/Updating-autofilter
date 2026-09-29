@@ -5,6 +5,7 @@ import logging
 import math
 import re
 import time
+from urllib.parse import quote_plus
 
 from pyrogram import Client, filters, enums
 from pyrogram.errors import RPCError
@@ -333,6 +334,22 @@ async def _expired(message):
     await message.edit_text(SEARCH_EXPIRED_TXT)
 
 
+def _not_found_buttons(query: str, user_id: int | None) -> list:
+    """Bottom rows for EVERY 'no result' message: Google search + request to
+    admin. One place builds them, so they can never go missing from one of
+    the not-found paths again."""
+    rows = [[InlineKeyboardButton(
+        "🔍 Search on Google",
+        url=f"https://www.google.com/search?q={quote_plus(query)}",
+    )]]
+    if REQUEST_CHANNEL and user_id:
+        rows.append([InlineKeyboardButton(
+            REQUEST_BTN_TXT,
+            callback_data=f"req#{_request_query_put(query)}#{user_id}",
+        )])
+    return rows
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Message handler
 # ══════════════════════════════════════════════════════════════════════════════
@@ -360,6 +377,7 @@ async def _status_update(message, text: str, markup=None):
     try:
         return await message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
     except RPCError:
+        logger.warning("Status edit failed (buttons may be missing)", exc_info=True)
         return message
 
 
@@ -456,21 +474,12 @@ async def handle_search(bot, message):
     else:
         markup = InlineKeyboardMarkup([])
     
-    # Always add Google search and request buttons at the bottom
-    google_query = query.replace(' ', '+')
-    markup.inline_keyboard.append([InlineKeyboardButton(
-        "🔍 Search on Google",
-        url=f"https://www.google.com/search?q={google_query}"
-    )])
-    
     user = message.from_user
-    can_request = bool(user) and user.id not in ADMINS
+    can_track = bool(user) and user.id not in ADMINS
 
-    if REQUEST_CHANNEL and can_request:
-        markup.inline_keyboard.append([InlineKeyboardButton(
-            REQUEST_BTN_TXT,
-            callback_data=f"req#{_request_query_put(query)}#{user.id}"
-        )])
+    # Google + Request buttons are always shown (admins included, so they can
+    # test the flow); only the automatic #FILE_NOT_FOUND timeout skips admins.
+    markup.inline_keyboard.extend(_not_found_buttons(query, user.id if user else None))
 
     if suggestions:
         await _status_update(status, SUGGESTIONS_HEADER_TXT.format(query=html.escape(query)), markup)
@@ -478,7 +487,7 @@ async def handle_search(bot, message):
         await _status_update(status, NOT_FOUND_TXT.format(query=html.escape(query)), markup)
 
     # Track for the "file not found" timeout notification
-    if NOT_FOUND_FILE_CHANNEL and can_request:
+    if NOT_FOUND_FILE_CHANNEL and can_track:
         _SUGGESTION_TRACKER[status.id] = {
             "clicked": False,
             "query": query,
@@ -575,7 +584,11 @@ async def suggestion_clicked(_, query):
     title = titles[int(idx)]
     results = await search_files(title)
     if not results:
-        await query.message.edit_text(SUGGESTION_NOT_FOUND_TXT.format(title=html.escape(title)))
+        await query.message.edit_text(
+            SUGGESTION_NOT_FOUND_TXT.format(title=html.escape(title)),
+            reply_markup=InlineKeyboardMarkup(_not_found_buttons(title, query.from_user.id)),
+            disable_web_page_preview=True,
+        )
         return
 
     await _deliver_results(query.message, title, results)
