@@ -57,6 +57,23 @@ CAPTION_LANGUAGES = {
     'guj': 'Gujarati', 'pun': 'Punjabi'
 }
 
+# Release-name junk tokens that should never appear in the clean display
+# title (codecs, containers, subtitle tags, audio specs, release phrases).
+# Language names are added to this set at match time (see extract_media_info).
+TITLE_JUNK_TOKENS = {
+    # codecs / encoding
+    'hevc', 'x264', 'x265', 'h264', 'h265', '10bit', '8bit', 'aac', 'ac3',
+    'ddp', 'dd', 'dts', 'truehd', 'atmos',
+    # containers
+    'mkv', 'mp4', 'avi', 'mov',
+    # subtitles
+    'esubs', 'esub', 'esubd', 'msubs', 'subs', 'sub',
+    # sources / release phrases
+    'hdts', 'hdtc', 'hdcam', 'camrip', 'dvdscr', 'predvd', 'preweb',
+    'untouched', 'dubbed', 'dual', 'audio', 'org', 'official', 'proper',
+    'repack', 'channel', 'movies', 'movie'
+}
+
 # Lock management for concurrent updates
 locks = {}
 pending_updates = {}
@@ -139,6 +156,35 @@ def schedule_update(bot, base_name, delay=5):
         lambda: asyncio.create_task(update_movie_message(bot, base_name))
     )
 
+def _title_tokens_to_drop(text: str) -> set:
+    """Junk tokens to strip from the display title: known junk plus any
+    language name/word that actually appears in this text."""
+    tokens = set(TITLE_JUNK_TOKENS)
+    text_lower = text.lower()
+    for code, name in CAPTION_LANGUAGES.items():
+        if code in text_lower or name.lower() in text_lower:
+            tokens.add(name.lower())
+            tokens.add(code)
+    return tokens
+
+
+def _strip_title_junk(base_name: str, processed: str) -> str:
+    """Return a clean display title: keep real title words, drop release
+    junk (codecs, containers, subs tags, languages, etc.) that survived
+    base_name extraction. Preserves original word order and casing."""
+    drop = _title_tokens_to_drop(processed)
+    words = []
+    for w in base_name.split():
+        if w.lower().strip('.') in drop:
+            continue
+        if re.fullmatch(r'\d+(\.\d+)*', w):   # "5", "5.1", "2.0" audio specs
+            continue
+        if re.fullmatch(r'[\W_]+', w):          # stray punctuation-only tokens
+            continue
+        words.append(w.strip('.') if len(w) > 1 else w)
+    return " ".join(words).strip() or base_name.strip()
+
+
 def extract_media_info(filename: str, caption: str):
     filename = normalize(clean_mentions_links(filename).title())
     caption_clean = clean_mentions_links(caption).lower() if caption else ""
@@ -154,6 +200,9 @@ def extract_media_info(filename: str, caption: str):
     base_name = SOURCE_PATTERN.sub('', base_name)
     base_name = RESOLUTION_PATTERN.sub('', base_name)
     base_name = normalize(base_name).strip()
+    # Drop leftover release junk (codecs, containers, subtitle tags, audio
+    # specs, language words) so the notification shows the clean title only.
+    display_name = _strip_title_junk(base_name, combined)
     
     # Extract quality info
     quality = get_qualities(combined)
@@ -183,6 +232,7 @@ def extract_media_info(filename: str, caption: str):
     
     return {
         "base_name": base_name,
+        "display_name": display_name,
         "processed": combined,
         "year": year,
         "quality": final_quality,
@@ -273,7 +323,9 @@ def generate_movie_message(movie_doc, base_name):
     rating = movie_doc.get("rating", "N/A")
     genres = movie_doc.get("genres", "N/A")
     tag = movie_doc.get("tag", "#MOVIE")
-    filename = base_name
+    # Prefer the clean display title recorded when the first file was
+    # processed; older docs (and manual entries) fall back to the _id.
+    filename = movie_doc.get("display_name") or base_name
     
     return MOVIE_UPDATE_NOTIFY_TXT.format(
         tag=tag,
@@ -456,7 +508,9 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
         used_tmdb = False
 
         if TMDB_POSTER:
-            tmdb_result = await get_movie_detailsx(base_name, year=media_info.get("year"))
+            # Query with the clean title — base_name still carries codec/
+            # container junk that ruins TMDB matching.
+            tmdb_result = await get_movie_detailsx(media_info["display_name"], year=media_info.get("year"))
             if tmdb_result and not tmdb_result.get("error"):
                 details = tmdb_result
                 used_tmdb = True
@@ -488,6 +542,7 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
 
         movie_doc = {
             "_id": base_name,
+            "display_name": media_info["display_name"],
             "files": [file_data],
             "poster_url": poster_url,
             "genres": genres,
@@ -612,12 +667,12 @@ async def _build_manual_update_doc(title: str, year: str, season: int):
     else:
         search_term_with_year = search_term
 
-    # Search DB
-    files, _, total = await search_files(search_term)
+    # Search DB — search_files() returns a plain list of file dicts
+    files = await search_files(search_term)
     if not files and year:
-        files, _, total = await search_files(search_term_with_year)
+        files = await search_files(search_term_with_year)
     if not files:
-        files, _, total = await search_files(title)
+        files = await search_files(title)
 
     # Filter for exact title matches
     files = [f for f in files if is_title_match(title, f"{f.get('file_name', '')} {f.get('caption', '') or ''}")]
