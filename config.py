@@ -84,6 +84,19 @@ NOT_FOUND_FILE_CHANNEL = int(not_found_channel) if not_found_channel and _id_pat
 # ── Auto-request timeout settings ─────────────────────────────────────────
 SUGGESTION_TIMEOUT = int(os.environ.get("SUGGESTION_TIMEOUT", "120"))  # seconds
 
+# ── Movie Update Notification Settings ───────────────────────────────────
+MOVIE_UPDATE_NOTIFICATION = _bool("MOVIE_UPDATE_NOTIFICATION", True)  # Notification On/Off
+movie_update_channel = os.environ.get("MOVIE_UPDATE_CHANNEL", "-1003073036876")
+MOVIE_UPDATE_CHANNEL = int(movie_update_channel) if movie_update_channel and _id_pattern.match(movie_update_channel) else None
+fetch_update_channels = os.environ.get("FETCH_MOVIE_UPDATE", "-1003073036876")  # Movie Update Fetch Channels (space-separated)
+FETCH_MOVIE_UPDATE = _int_list("FETCH_MOVIE_UPDATE", "-1003073036876")  # List of channel IDs for auto-fetch
+
+# ── Movie Update Display Settings ─────────────────────────────────────────
+LINK_PREVIEW = _bool("LINK_PREVIEW", False)  # Shows link preview instead of image
+ABOVE_PREVIEW = _bool("ABOVE_PREVIEW", True)  # Shows link preview above text if True
+TMDB_POSTER = _bool("TMDB_POSTER", True)  # Shows TMDB poster in notification
+LANDSCAPE_POSTER = _bool("LANDSCAPE_POSTER", True)  # Shows landscape poster
+
 # ── Web server (Koyeb requires the app to bind $PORT) ────────────────────────
 PORT = int(os.environ.get("PORT", "8080"))
 
