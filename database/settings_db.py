@@ -13,7 +13,7 @@ per-request DB cost no matter how many features are toggled on.
 import logging
 
 from database.client import db
-from config import CHANNELS
+from config import CHANNELS, FETCH_MOVIE_UPDATE
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,17 @@ DEFAULTS = {
     # auto-indexing without any action; from here on this list lives only
     # in the database and is managed from /settings.
     "index_channels": list(CHANNELS),
+    # Movie-update fetch channels (admin-managed via /settings; falls back to
+    # the FETCH_MOVIE_UPDATE env var on first boot so existing deployments
+    # keep working without any action).
+    "fetch_movie_update_channels": list(FETCH_MOVIE_UPDATE),
     "query_autodelete_enabled": False,
     "query_autodelete_seconds": 300,
     "file_autodelete_enabled": False,
     "file_autodelete_seconds": 600,
     "file_limit_enabled": False,
     "file_limit_count": 2,
+    "movie_update_notification": True,
 }
 
 _cache: dict | None = None
@@ -115,3 +120,11 @@ async def add_index_channel(channel_id: int) -> dict:
 
 async def remove_index_channel(channel_id: int) -> dict:
     return await _remove_channel("index_channels", channel_id)
+
+
+async def add_fetch_channel(channel_id: int) -> dict:
+    return await _add_channel("fetch_movie_update_channels", channel_id)
+
+
+async def remove_fetch_channel(channel_id: int) -> dict:
+    return await _remove_channel("fetch_movie_update_channels", channel_id)
