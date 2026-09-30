@@ -12,6 +12,7 @@ from database.settings_db import (
     get_settings, update_settings, set_shortener, set_tutorial,
     add_fsub_channel, remove_fsub_channel,
     add_index_channel, remove_index_channel,
+    add_fetch_channel, remove_fetch_channel,
 )
 from database.premium_db import list_premium, count_premium
 from database.filters_db import count_by_channel, export_all_captions, backfill_word_index
@@ -36,6 +37,10 @@ from strings import (
     ASK_FILE_LIMIT_PROMPT, FILE_LIMIT_SET_TXT, FILE_LIMIT_NEEDS_VERIFY_NOTE,
     EXPORT_CAPTIONS_PREPARING, EXPORT_CAPTIONS_CAPTION_TXT, EXPORT_CAPTIONS_EMPTY_TXT,
     BACKFILL_RUNNING, BACKFILL_DONE_TXT,
+    MOVIE_UPDATE_MENU_HEADER,
+    MOVIE_UPDATE_FETCH_HEADER, MOVIE_UPDATE_FETCH_ROW, MOVIE_UPDATE_FETCH_EMPTY,
+    MOVIE_UPDATE_FETCH_ADDED, MOVIE_UPDATE_FETCH_REMOVED,
+    MOVIE_UPDATE_TEST_USAGE,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,6 +86,8 @@ def build_main_menu(settings: dict) -> InlineKeyboardMarkup:
              f"🔢 File Limit ({settings['file_limit_count']}/day)",
              callback_data="cfg#ask#file_limit",
          )],
+        [InlineKeyboardButton(_status(settings["movie_update_notification"]), callback_data="cfg#tg#movieupd"),
+         InlineKeyboardButton("🎬 Movie Updates", callback_data="cfg#m#movieupd")],
         [InlineKeyboardButton("📄 Export All Captions", callback_data="cfg#export")],
         [InlineKeyboardButton("🔁 Backfill Search Index", callback_data="cfg#backfill")],
         [InlineKeyboardButton("❌ Close", callback_data="cfg#close")],
@@ -154,6 +161,33 @@ async def build_premium_menu(offset: int = 0):
     return text, InlineKeyboardMarkup(rows)
 
 
+async def build_movie_update_menu(bot, settings: dict):
+    fetch_channels = list(settings.get("fetch_movie_update_channels", []))
+
+    async def _title(cid):
+        try:
+            return (await bot.get_chat(cid)).title
+        except RPCError:
+            return str(cid)
+
+    titles = await asyncio.gather(*[_title(c) for c in fetch_channels])
+
+    text = MOVIE_UPDATE_MENU_HEADER
+    if fetch_channels:
+        rows_txt = "".join(MOVIE_UPDATE_FETCH_ROW.format(title=t) for t in titles)
+        text += "\n\n" + MOVIE_UPDATE_FETCH_HEADER + rows_txt
+    else:
+        text += "\n\n" + MOVIE_UPDATE_FETCH_EMPTY
+
+    rows = [
+        [InlineKeyboardButton(f"🗑 {title}", callback_data=f"cfg#mu_rm#{cid}")]
+        for cid, title in zip(fetch_channels, titles)
+    ]
+    rows.append([InlineKeyboardButton("➕ Add Fetch Channel", callback_data="cfg#mu_add")])
+    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="cfg#main")])
+    return text, InlineKeyboardMarkup(rows)
+
+
 def build_verify_menu(settings: dict):
     body = "\n".join(
         VERIFY_TIER_ROW.format(
@@ -207,6 +241,7 @@ async def settings_callback(bot, query):
             "query_ad": "query_autodelete_enabled",
             "file_ad": "file_autodelete_enabled",
             "filelimit": "file_limit_enabled",
+            "movieupd": "movie_update_notification",
         }.get(parts[2])
         if field:
             settings = await get_settings()
@@ -235,6 +270,8 @@ async def settings_callback(bot, query):
             text, markup = await build_index_menu(bot, settings)
         elif parts[2] == "premium":
             text, markup = await build_premium_menu()
+        elif parts[2] == "movieupd":
+            text, markup = await build_movie_update_menu(bot, settings)
         else:
             text, markup = build_verify_menu(settings)
         await query.message.edit_text(text, reply_markup=markup)
@@ -281,6 +318,29 @@ async def settings_callback(bot, query):
             not_admin_text=INDEX_ADD_NOT_ADMIN, ok_text=INDEX_ADD_OK, failed_text=INDEX_ADD_FAILED,
             add_fn=add_index_channel, build_menu_fn=build_index_menu,
         )
+        return
+
+    if action == "mu_add":
+        await query.answer()
+        await _run_channel_add(
+            bot, query,
+            prompt_text=INDEX_ADD_PROMPT, not_channel_text=INDEX_ADD_NOT_CHANNEL,
+            not_admin_text=INDEX_ADD_NOT_ADMIN, ok_text=MOVIE_UPDATE_FETCH_ADDED,
+            failed_text=INDEX_ADD_FAILED,
+            add_fn=add_fetch_channel, build_menu_fn=build_movie_update_menu,
+        )
+        return
+
+    if action == "mu_rm":
+        channel_id = int(parts[2])
+        settings = await remove_fetch_channel(channel_id)
+        await query.answer(MOVIE_UPDATE_FETCH_REMOVED)
+        text, markup = await build_movie_update_menu(bot, settings)
+        await query.message.edit_text(text, reply_markup=markup)
+        return
+
+    if action == "mu_test":
+        await query.answer(MOVIE_UPDATE_TEST_USAGE, show_alert=True)
         return
 
     if action == "ask":
