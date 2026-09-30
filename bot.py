@@ -11,6 +11,7 @@ from database.premium_db import ensure_indexes as ensure_premium_indexes
 from database.verify_db import ensure_indexes as ensure_verify_indexes
 from database.request_db import ensure_indexes as ensure_request_indexes
 from database.settings_db import get_settings
+from database.movie_update_db import movie_update_db
 from utils import temp
 from web import web_app
 
@@ -28,7 +29,10 @@ USER_COMMANDS = [
     BotCommand("req", "Request a file"),
     BotCommand("request", "Request a file"),
 ]
-ADMIN_COMMANDS = USER_COMMANDS + [BotCommand("settings", "Admin settings panel")]
+ADMIN_COMMANDS = USER_COMMANDS + [
+    BotCommand("admin", "Admin commands panel"),
+    BotCommand("settings", "Admin settings panel"),
+]
 
 
 class Bot(Client):
@@ -48,6 +52,7 @@ class Bot(Client):
         await ensure_premium_indexes()
         await ensure_verify_indexes()
         await ensure_request_indexes()
+        await movie_update_db.ensure_indexes()
         await get_settings()  # warm the settings cache, create the doc on first boot
         await super().start()
         me = await self.get_me()

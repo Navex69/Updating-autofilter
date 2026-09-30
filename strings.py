@@ -149,6 +149,24 @@ ASK_FILE_LIMIT_PROMPT = "Send how many free files a non-premium user can get per
 FILE_LIMIT_SET_TXT = "✅ Free daily file limit set to <code>{count}</code>."
 FILE_LIMIT_NEEDS_VERIFY_NOTE = "\n\n⚠️ File limit only takes effect while <b>Verification</b> is also on — it's currently off, so this has no effect yet."
 
+# ── Movie Update Notification (settings panel) ────────────────────────────────
+MOVIE_UPDATE_MENU_HEADER = (
+    "🎬 <b>Movie Update Notifications</b>\n\n"
+    "Automatically posts a formatted update to the update channel whenever a "
+    "new file lands in one of the fetch channels."
+)
+MOVIE_UPDATE_FETCH_HEADER = "📥 <b>Fetch Channels</b>\n\nFiles posted in these channels trigger movie updates.\n\n"
+MOVIE_UPDATE_FETCH_ROW = "🗑 {title} — {count} updates\n"
+MOVIE_UPDATE_FETCH_EMPTY = "📥 <b>Fetch Channels</b>\n\nNo fetch channels configured."
+MOVIE_UPDATE_FETCH_ADDED = "✅ Added <b>{title}</b> to fetch channels."
+MOVIE_UPDATE_FETCH_REMOVED = "✅ Removed from fetch channels."
+MOVIE_UPDATE_POST_TEST = "🧪 Send Test Update"
+MOVIE_UPDATE_TEST_USAGE = "Usage: <code>/m title [year] [s01]</code>\n\nExample: <code>/m pushpa 2021</code>"
+MOVIE_UPDATE_TEST_NO_CHANNEL = "⚠️ MOVIE_UPDATE_CHANNEL is not configured."
+MOVIE_UPDATE_TEST_NO_FILES = "⚠️ No matching files found in the database."
+MOVIE_UPDATE_TEST_SENT = "✅ Test update posted to the update channel."
+MOVIE_UPDATE_TEST_FAILED = "❌ Test update failed: <code>{error}</code>"
+
 EXPORT_CAPTIONS_PREPARING = "📄 Preparing export…"
 EXPORT_CAPTIONS_CAPTION_TXT = "📄 Exported <b>{count}</b> file captions from the database."
 EXPORT_CAPTIONS_EMPTY_TXT = "⚠️ No files are indexed yet — nothing to export."
@@ -182,3 +200,23 @@ CHECK_SPELLING_TXT = "📌 Requested – <code>{requested_name}</code>\n\nAdmin 
 YEAR_LANGUAGE_TXT = "📌 Requested – <code>{requested_name}</code>\n\nBro please tell me years, language, bollywood or hollywood etc., then I will upload 😬. Just re-send request with more info."
 WRONG_SPELLING_TXT = "✏️ Admin provided correct spelling: <code>{correct_spelling}</code>\n\nPlease request again with correct spelling."
 CUSTOM_REPLY_TXT = "💬 Admin replied to your request:\n\n{custom_message}"
+
+# ── Movie Update Notification ───────────────────────────────────────────────
+MOVIE_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
+
+<blockquote>🎭 ɢᴇɴʀᴇs     : <b>{genres}</b>
+📺 ᴏᴛᴛ          : <b>{ott}</b>
+🎞️ ǫᴜᴀʟɪᴛʏ  : <b>{quality}</b>
+📐 ʀᴇsᴏʟᴜᴛɪᴏɴ : <b>{resolution}</b>
+🎧 ᴀᴜᴅɪᴏ       : <b>{language}</b>
+🔥 ʀᴀᴛɪɴɢ      : <b>{rating} ⭐</b>
+{episodes}</blockquote>"""
+
+MANUAL_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
+
+<blockquote>🎭 ɢᴇɴʀᴇs     : <b>{genres}</b>
+🎞️ ǫᴜᴀʟɪᴛʏ  : <b>{quality}</b>
+📐 ʀᴇsᴏʟᴜᴛɪᴏɴ : <b>{resolution}</b>
+🎧 ᴀᴜᴅɪᴏ       : <b>{language}</b>
+🔥 ʀᴀᴛɪɴɢ      : <b>{rating} ⭐</b>
+{episodes}</blockquote>"""
