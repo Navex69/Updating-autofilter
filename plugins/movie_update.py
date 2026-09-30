@@ -533,8 +533,12 @@ async def _active_fetch_channels() -> list:
     return list(FETCH_MOVIE_UPDATE or [])
 
 
-# Automatic movie update fetcher
-@Client.on_message(media_filter)
+# Automatic movie update fetcher.
+# NOTE: group=1 — index.py's auto-indexer lives in group 0, and Pyrogram runs
+# only the first matching handler per group. With both in group 0, a channel
+# that is both an index channel and a fetch channel would only ever get
+# indexed (or only get a movie update), never both.
+@Client.on_message(media_filter, group=1)
 async def movie_update_fetcher(bot, message):
     """Automatically process files uploaded to fetch channels."""
     if message.chat.id not in await _active_fetch_channels():
@@ -548,8 +552,9 @@ async def movie_update_fetcher(bot, message):
         return
     
     media.file_type = next(
-        ft for ft in ("document", "video", "audio")
-        if hasattr(message, ft)
+        (ft for ft in ("document", "video", "audio")
+         if getattr(message, ft, None)),
+        None
     )
     media.caption = message.caption or ""
     

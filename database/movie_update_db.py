@@ -14,7 +14,9 @@ class MovieUpdateDB:
     async def ensure_indexes(self):
         """Create necessary indexes for movie updates collection."""
         try:
-            await self.movie_updates.create_index([("_id", 1)], unique=True)
+            # NOTE: MongoDB always creates a unique index on _id automatically.
+            # Trying to create it again with unique=True raised
+            # InvalidIndexSpecificationOption and aborted the whole ensure step.
             await self.movie_updates.create_index([("message_id", 1)])
             logger.info("Movie update indexes ensured")
         except Exception as e:

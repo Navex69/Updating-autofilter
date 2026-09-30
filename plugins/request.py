@@ -454,7 +454,31 @@ async def responded_alert_callback(bot, query):
         await query.answer("⚠️ Admin only!", show_alert=True)
 
 
-@Client.on_message(filters.private & filters.text)
+# Only fire when an admin is actually replying to one of THIS plugin's
+# prompts. A bare filters.private & filters.text also matches plain text and
+# every /command — and since Pyrogram runs only the first matching handler in
+# a group, that handler was registered before search.py/start.py (plugins
+# load alphabetically) and silently swallowed ALL private messages, leaving
+# the bot looking completely dead (no /start, no search, no /m).
+def _is_prompt_reply(_, __, message):
+    if not (message.chat and message.chat.type == enums.ChatType.PRIVATE):
+        return False
+    if not message.text:
+        return False
+    if not _CUSTOM_REPLY_WAIT and not _WRONG_SPELL_WAIT:
+        return False
+    if not message.reply_to_message:
+        return False
+    prompt_id = message.reply_to_message.id
+    in_custom = any(d["prompt_id"] == prompt_id for d in _CUSTOM_REPLY_WAIT.values())
+    in_wrong = any(d["prompt_id"] == prompt_id for d in _WRONG_SPELL_WAIT.values())
+    return in_custom or in_wrong
+
+
+prompt_reply_filter = filters.create(_is_prompt_reply)
+
+
+@Client.on_message(prompt_reply_filter)
 async def handle_custom_reply_input(bot, message):
     """Handle custom reply and wrong spelling input from admins."""
     # Check if this is a response to a custom reply prompt
