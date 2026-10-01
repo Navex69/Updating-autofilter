@@ -12,6 +12,7 @@ from database.verify_db import ensure_indexes as ensure_verify_indexes
 from database.request_db import ensure_indexes as ensure_request_indexes
 from database.settings_db import get_settings
 from database.movie_update_db import movie_update_db
+from log_utils import schedule_restart_notice
 from utils import temp
 from web import web_app
 
@@ -68,6 +69,8 @@ class Bot(Client):
         await web.TCPSite(runner, "0.0.0.0", PORT).start()
 
         logger.info("%s started as @%s (health check on :%s)", me.first_name, me.username, PORT)
+
+        schedule_restart_notice()
 
     async def _setup_commands(self):
         """Runs on every boot so a fresh deploy needs zero manual BotFather
