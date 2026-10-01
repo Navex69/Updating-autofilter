@@ -8,6 +8,7 @@ Extra admin features — drop-in plugin (auto-loaded, no other file needs editin
   5. /checklimit /resetlimit /resetlimitall   daily free-file limit control
   6. /show_groups /leave_groups   manage groups the bot is admin in
   7. /broadcast    any media type, optional pin, live progress, cancel + undo
+  8. /stats        full dashboard (channels, users, groups, DB storage, server)
 
 Helper commands:  /extra (command list)   /syncusers (import old users)
 
@@ -17,6 +18,7 @@ New MongoDB collections (this file creates them itself):
 import asyncio
 import html
 import logging
+import os
 import re
 import secrets
 import time
@@ -30,9 +32,10 @@ from pyrogram.errors import (
 )
 from pyrogram.types import InlineKeyboardMarkup as Markup, InlineKeyboardButton as Btn
 
-from config import ADMINS
+from config import ADMINS, ENABLE_PM_SEARCH
 from database.client import db
-from database.filters_db import files, get_file_by_id, display_name
+from database.filters_db import files, get_file_by_id, display_name, count_by_channel
+from database.premium_db import premium_col
 from database.limit_db import limit_col
 from database.settings_db import get_settings
 from utils import IST, Throttle, readable_time
@@ -1281,6 +1284,146 @@ async def _delete_broadcast(bot, bc: dict, final_title: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 8. /stats — full dashboard (replaces the old one-line /stats in start.py)
+# ══════════════════════════════════════════════════════════════════════════════
+
+try:
+    import psutil
+except ImportError:           # bot still runs; server section just shows less
+    psutil = None
+
+_PROC_START = time.time()
+# Atlas free (M0) clusters hold 512 MB. Change with MONGO_STORAGE_LIMIT_MB if yours differs.
+_DB_LIMIT_MB = float(os.environ.get("MONGO_STORAGE_LIMIT_MB", "512"))
+
+
+def _mb(n: float) -> str:
+    n /= 1024 * 1024
+    return f"{n / 1024:.2f} GB" if n >= 1024 else f"{n:.1f} MB"
+
+
+def _status_dot(pct: float) -> str:
+    return "🟢" if pct < 70 else ("🟡" if pct < 90 else "🔴")
+
+
+async def _channel_lines(bot) -> tuple[list, int]:
+    settings = await get_settings()
+    chans = list(settings["index_channels"])
+
+    async def one(cid):
+        try:
+            title = (await bot.get_chat(cid)).title
+        except Exception:
+            title = None
+        return cid, title, await count_by_channel(cid)
+
+    rows = await asyncio.gather(*(one(c) for c in chans))
+    lines = []
+    for i, (cid, title, n) in enumerate(rows[:12], 1):
+        name = esc(title) if title else "<i>unreachable</i>"
+        lines.append(f"  {i}. {name}\n      <code>{cid}</code> — <b>{n}</b> files")
+    if len(rows) > 12:
+        lines.append(f"  … and {len(rows) - 12} more channels")
+    return lines, sum(r[2] for r in rows)
+
+
+async def _db_lines() -> list:
+    try:
+        st = await db.command("dbStats", scale=1)
+    except Exception:
+        return ["  ⚠️ Couldn't read storage stats"]
+    used = st.get("storageSize", 0) + st.get("indexSize", 0)
+    limit = _DB_LIMIT_MB * 1024 * 1024
+    pct = used / limit * 100 if limit else 0
+    return [
+        f"  {_status_dot(pct)} <code>{_bar(int(pct), 100, 12)}</code> <b>{pct:.1f}%</b>",
+        f"  💽 Used: <b>{_mb(used)}</b> of <b>{_mb(limit)}</b>",
+        f"  🆓 Free: <b>{_mb(max(limit - used, 0))}</b>",
+        f"  📄 Data: {_mb(st.get('dataSize', 0))} · Indexes: {_mb(st.get('indexSize', 0))}",
+        f"  📚 Collections: <code>{st.get('collections', 0)}</code> · Objects: <code>{st.get('objects', 0)}</code>",
+    ]
+
+
+async def _server_lines() -> list:
+    if not psutil:
+        return [f"  ⏱ Uptime: <b>{readable_time(time.time() - _PROC_START)}</b>",
+                "  ℹ️ Install <code>psutil</code> for RAM / CPU stats"]
+    proc = psutil.Process(os.getpid())
+    proc.cpu_percent(None)
+    psutil.cpu_percent(None)
+    await asyncio.sleep(0.5)                       # sample window for CPU %
+    cpu_bot, cpu_sys = proc.cpu_percent(None), psutil.cpu_percent(None)
+    ram_bot, vm = proc.memory_info().rss, psutil.virtual_memory()
+    uptime = readable_time(time.time() - proc.create_time())
+    return [
+        f"  ⏱ Uptime: <b>{uptime}</b>",
+        f"  🧠 RAM (bot): <b>{_mb(ram_bot)}</b>",
+        f"  🧠 RAM (server): <b>{_mb(vm.used)}</b> / {_mb(vm.total)} (<b>{vm.percent:.0f}%</b>)",
+        f"  🔥 CPU (bot): <b>{cpu_bot:.1f}%</b> · CPU (server): <b>{cpu_sys:.1f}%</b> · Cores: <code>{psutil.cpu_count()}</code>",
+    ]
+
+
+async def build_stats(bot) -> str:
+    now = _now()
+    (chan_lines, in_channels), db_lines, server_lines = await asyncio.gather(
+        _channel_lines(bot), _db_lines(), _server_lines()
+    )
+    total_files_n = await files.estimated_document_count()
+    users = await users_col.count_documents({})
+    inactive = await users_col.count_documents({"active": False})
+    groups = await groups_col.count_documents({"left": {"$ne": True}})
+    left_groups = await groups_col.count_documents({"left": True})
+    premium = await premium_col.count_documents({"expiry_time": {"$gt": now}})
+    banned = await banned_col.count_documents({})
+    settings = await get_settings()
+
+    other = max(total_files_n - in_channels, 0)
+    pm = "✅" if ENABLE_PM_SEARCH else "❌"
+    lines = [
+        "📊 <b>Bot Statistics</b>\n",
+        f"🔎 <b>Autofilter:</b> 🟢 ON  <i>(Groups ✅ · PM {pm})</i>",
+        f"📥 <b>Auto-indexing:</b> <code>{len(settings['index_channels'])}</code> channel(s)\n",
+        "📚 <b>Index channels</b>",
+        *(chan_lines or ["  <i>No index channels set</i>"]),
+    ]
+    if other:
+        lines.append(f"  ➕ Other / older files: <b>{other}</b>")
+    lines += [
+        f"\n📁 <b>Total indexed files:</b> <code>{total_files_n}</code>\n",
+        f"👥 <b>Total users:</b> <code>{users}</code>  <i>(inactive: {inactive})</i>",
+        f"🏘 <b>Total groups:</b> <code>{groups}</code>",
+        f"💎 <b>Premium users:</b> <code>{premium}</code>",
+        f"🚫 <b>Banned users:</b> <code>{banned}</code>",
+        f"🚪 <b>Left / removed groups:</b> <code>{left_groups}</code>\n",
+        "🗄 <b>MongoDB storage</b>",
+        *db_lines,
+        "\n🤖 <b>Bot details</b>",
+        *server_lines,
+    ]
+    return "\n".join(lines)
+
+
+def _stats_markup():
+    return Markup([[Btn("🔄 Refresh", callback_data="st#refresh"), Btn("✖️ Close", callback_data="st#close")]])
+
+
+@Client.on_message(filters.command("stats") & ADMIN)
+async def stats_cmd(bot, message):
+    wait = await message.reply_text("📊 Gathering stats…")
+    await _safe_edit(wait, await build_stats(bot), _stats_markup())
+
+
+@Client.on_callback_query(filters.regex(r"^st#") & ADMIN)
+async def stats_callbacks(bot, query):
+    if query.data.endswith("close"):
+        await query.message.delete()
+        return
+    await query.answer("Refreshing…")
+    await _safe_edit(query.message, await build_stats(bot), _stats_markup())
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # HELPERS: /syncusers  /extra   (+ nudge when a PM-only command is used in a group)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1308,6 +1451,7 @@ async def syncusers_cmd(_, message):
 async def extra_help(_, message):
     await message.reply_text(
         "<b>🧰 Extra admin commands</b>\n\n"
+        "• /stats — full dashboard\n\n"
         "<b>💬 Messaging</b>\n"
         "• /send <code>id [id…]</code> — reply to a message to send it to users\n"
         "• /broadcast — reply to a message to send to everyone <i>(PM)</i>\n"
