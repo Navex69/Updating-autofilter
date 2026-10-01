@@ -73,6 +73,10 @@ FUZZY_MATCH_THRESHOLD = int(os.environ.get("FUZZY_MATCH_THRESHOLD", "82"))
 log_channel = os.environ.get("LOG_CHANNEL", "-1003073036876")
 LOG_CHANNEL = int(log_channel) if log_channel and _id_pattern.match(log_channel) else None
 
+# ── Send a "bot restarted" DM to every admin on each boot ──────────────────
+# Admins who never started the bot are skipped automatically.
+RESTART_NOTIFY = _bool("RESTART_NOTIFY", True)
+
 # ── Request channel for user file requests ─────────────────────────────────
 request_channel = os.environ.get("REQUEST_CHANNEL", "-1003073036876")
 REQUEST_CHANNEL = int(request_channel) if request_channel and _id_pattern.match(request_channel) else None
