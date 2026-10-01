@@ -222,8 +222,8 @@ async def get_movie_details(query: str, file: str = None) -> dict:
 
     cache_key = f"details_{title.lower()}|{year}"
     cached = _cache_get(cache_key)
-    if cached is not None:
-        return cached or {}
+    if cached:
+        return cached
 
     result = None
     timeout = aiohttp.ClientTimeout(total=POSTER_FETCH_TIMEOUT)
@@ -242,7 +242,8 @@ async def get_movie_details(query: str, file: str = None) -> dict:
     except (asyncio.TimeoutError, aiohttp.ClientError):
         logger.debug("Movie metadata fetch network error for %r", title)
 
-    _cache_set(cache_key, result or {})
+    if result:                      # never cache a miss — a network hiccup must not stick for hours
+        _cache_set(cache_key, result)
     return result or {}
 
 
@@ -260,7 +261,7 @@ async def get_movie_detailsx(query: str, year: str = None, prefer_tv: bool = Fal
 
     cache_key = f"detailsx_{title.lower()}|{year or ''}|{int(prefer_tv)}"
     cached = _cache_get(cache_key)
-    if cached is not None:
+    if cached:
         return cached
 
     result = None
@@ -280,5 +281,6 @@ async def get_movie_detailsx(query: str, year: str = None, prefer_tv: bool = Fal
     except (asyncio.TimeoutError, aiohttp.ClientError):
         logger.debug("Movie metadata fetch network error for %r", title)
 
-    _cache_set(cache_key, result or {"error": "Not found"})
+    if result:
+        _cache_set(cache_key, result)
     return result or {"error": "Not found"}
