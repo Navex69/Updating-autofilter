@@ -221,3 +221,27 @@ MANUAL_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
 🎧 ᴀᴜᴅɪᴏ       : <b>{language}</b>
 🔥 ʀᴀᴛɪɴɢ      : <b>{rating} ⭐</b>
 {episodes}</blockquote>"""
+
+# ── restart notice (admin DM) and log-channel messages ──────────────────────
+RESTART_TXT = """🔄 <b>Bot Restarted</b>
+
+🤖 @{username} is back online.
+🕐 <b>Time:</b> {time}"""
+
+NEW_USER_LOG_TXT = """#NewUser
+👤 <b>New user started the bot</b>
+
+<b>Name:</b> {mention}
+<b>ID:</b> <code>{user_id}</code>
+<b>Username:</b> {username}
+<b>Total users:</b> {total}
+<b>Time:</b> {time}
+<b>Bot:</b> @{bot}"""
+
+USER_VERIFIED_LOG_TXT = """#UserVerified
+✅ <b>User verified</b> — {ordinal} verification ({tier}/3)
+
+<b>Name:</b> {mention}
+<b>ID:</b> <code>{user_id}</code>
+<b>Username:</b> {username}
+<b>Time:</b> {time}"""
