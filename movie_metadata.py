@@ -43,7 +43,11 @@ def _clean_title_year(query: str) -> tuple[str, str]:
     text = _NOISE_RE.sub(" ", text)
     text = _PUNCT_RE.sub(" ", text)
     if year:
-        text = text.replace(year, " ")
+        stripped = _SPACE_RE.sub(" ", text.replace(year, " ")).strip()
+        if stripped:
+            text = stripped
+        else:               # the "year" IS the title (e.g. "1917")
+            year = ""
     text = _SPACE_RE.sub(" ", text).strip()
     return text, year
 
@@ -65,16 +69,30 @@ def _cache_set(key: str, value):
     _CACHE[key] = (time.time(), value)
 
 
-async def _tmdb_lookup_detailed(session: aiohttp.ClientSession, title: str, year: str):
+async def _tmdb_lookup_detailed(session: aiohttp.ClientSession, title: str, year: str, prefer_tv: bool = False):
     """Fetch detailed movie/series info from TMDB."""
-    params = {"api_key": TMDB_API_KEY, "query": title, "include_adult": "false"}
-    if year:
-        params["year"] = year
-    async with session.get("https://api.themoviedb.org/3/search/multi", params=params) as r:
-        if r.status != 200:
-            return None
-        data = await r.json()
-    results = [x for x in data.get("results", []) if x.get("media_type") in ("movie", "tv")]
+    # search/multi ignores `year`, so search movie and tv separately and let
+    # the year (and the series/movie hint) pick the right one.
+    results = []
+    for kind in (("tv", "movie") if prefer_tv else ("movie", "tv")):
+        params = {"api_key": TMDB_API_KEY, "query": title, "include_adult": "false"}
+        if year:
+            params["year" if kind == "movie" else "first_air_date_year"] = year
+        try:
+            async with session.get(f"https://api.themoviedb.org/3/search/{kind}", params=params) as r:
+                if r.status != 200:
+                    continue
+                data = await r.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            continue
+        for x in data.get("results", []):
+            x["media_type"] = kind
+            results.append(x)
+        if results:
+            break          # first preferred kind with hits wins
+    if not results and year:
+        # year may be wrong/just a title number — retry without it
+        return await _tmdb_lookup_detailed(session, title, "", prefer_tv)
     if not results:
         return None
 
@@ -106,30 +124,31 @@ async def _tmdb_lookup_detailed(session: aiohttp.ClientSession, title: str, year
     # Extract rating
     rating = detail_data.get("vote_average")
     if rating:
-        rating = f"{rating:.1f}"
+        rating = f"{float(rating):.1f}"
     else:
         rating = "N/A"
 
-    # Extract poster/backdrop
+    # Extract poster/backdrop — poster_url is the PORTRAIT image; the
+    # landscape one is backdrop_url (callers choose via LANDSCAPE_POSTER).
     backdrop = detail_data.get("backdrop_path")
     poster = detail_data.get("poster_path")
-    
+
     poster_url = None
-    if backdrop:
-        poster_url = f"{TMDB_IMG_LANDSCAPE}{backdrop}"
-    elif poster:
+    if poster:
         poster_url = f"{TMDB_IMG_PORTRAIT}{poster}"
+    elif backdrop:
+        poster_url = f"{TMDB_IMG_LANDSCAPE}{backdrop}"
 
     # Get IMDB ID for URL
     imdb_id = detail_data.get("imdb_id")
     imdb_url = f"https://www.imdb.com/title/{imdb_id}/" if imdb_id else ""
-    
+
     # Determine kind
     kind = "tv" if media_type == "tv" else "movie"
 
     return {
         "title": pick.get("title") or pick.get("name") or title,
-        "year": detail_data.get("release_date") or detail_data.get("first_air_date") or year,
+        "year": (detail_data.get("release_date") or detail_data.get("first_air_date") or year or "")[:4] or None,
         "genres": ", ".join(genres) if genres else "N/A",
         "rating": rating,
         "poster_url": poster_url,
@@ -177,7 +196,7 @@ async def _omdb_lookup_detailed(session: aiohttp.ClientSession, title: str, year
 
     return {
         "title": data.get("Title") or title,
-        "year": data.get("Year") or year,
+        "year": (data.get("Year") or year or "")[:4] or None,
         "genres": genres,
         "rating": imdb_rating,
         "poster_url": poster_url,
@@ -227,7 +246,7 @@ async def get_movie_details(query: str, file: str = None) -> dict:
     return result or {}
 
 
-async def get_movie_detailsx(query: str, year: str = None) -> dict:
+async def get_movie_detailsx(query: str, year: str = None, prefer_tv: bool = False) -> dict:
     """
     Extended version with explicit year parameter for better matching.
     Used by the manual movie update command.
@@ -239,7 +258,7 @@ async def get_movie_detailsx(query: str, year: str = None) -> dict:
     if not title:
         return {"error": "Invalid query"}
 
-    cache_key = f"detailsx_{title.lower()}|{year or ''}"
+    cache_key = f"detailsx_{title.lower()}|{year or ''}|{int(prefer_tv)}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
@@ -250,7 +269,7 @@ async def get_movie_detailsx(query: str, year: str = None) -> dict:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             if TMDB_API_KEY:
                 try:
-                    result = await _tmdb_lookup_detailed(session, title, year or "")
+                    result = await _tmdb_lookup_detailed(session, title, year or "", prefer_tv)
                 except Exception:
                     logger.debug("TMDB detailed lookup failed for %r", title, exc_info=True)
             if not result and OMDB_API_KEY:

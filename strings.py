@@ -152,16 +152,18 @@ FILE_LIMIT_NEEDS_VERIFY_NOTE = "\n\n⚠️ File limit only takes effect while <b
 # ── Movie Update Notification (settings panel) ────────────────────────────────
 MOVIE_UPDATE_MENU_HEADER = (
     "🎬 <b>Movie Update Notifications</b>\n\n"
+    "Status: {status}\n\n"
     "Automatically posts a formatted update to the update channel whenever a "
     "new file lands in one of the fetch channels."
 )
 MOVIE_UPDATE_FETCH_HEADER = "📥 <b>Fetch Channels</b>\n\nFiles posted in these channels trigger movie updates.\n\n"
-MOVIE_UPDATE_FETCH_ROW = "🗑 {title} — {count} updates\n"
+MOVIE_UPDATE_FETCH_ROW = "• {title}\n"
 MOVIE_UPDATE_FETCH_EMPTY = "📥 <b>Fetch Channels</b>\n\nNo fetch channels configured."
 MOVIE_UPDATE_FETCH_ADDED = "✅ Added <b>{title}</b> to fetch channels."
 MOVIE_UPDATE_FETCH_REMOVED = "✅ Removed from fetch channels."
 MOVIE_UPDATE_POST_TEST = "🧪 Send Test Update"
-MOVIE_UPDATE_TEST_USAGE = "Usage: <code>/m title [year] [s01]</code>\n\nExample: <code>/m pushpa 2021</code>"
+MOVIE_UPDATE_TEST_USAGE = "Send /m title [year] [s01] to post a manual update. Example: /m pushpa 2021"
+MOVIE_UPDATE_FETCH_PROMPT = "Forward a message from the channel to watch for new files, or send its @username / -100 ID."
 MOVIE_UPDATE_TEST_NO_CHANNEL = "⚠️ MOVIE_UPDATE_CHANNEL is not configured."
 MOVIE_UPDATE_TEST_NO_FILES = "⚠️ No matching files found in the database."
 MOVIE_UPDATE_TEST_SENT = "✅ Test update posted to the update channel."
