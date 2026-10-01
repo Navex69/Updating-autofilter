@@ -26,62 +26,18 @@ async def start_cmd(bot, message):
         return
 
     if payload.startswith("getfile-"):
-        # Handle movie update search query
-        from database.filters_db import search_files
-        from poster import fetch_poster
-        from database.settings_db import get_settings
-        from utils import human_size
-        from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        # Deep link from a /m movie-update post: run the normal search flow
+        # (poster, pagination, season/language/quality filters).
         import html
-        
-        search_query = payload[len("getfile-"):].replace("-", " ")
-        
-        # Search for files
-        results = await search_files(search_query)
+        from database.filters_db import search_files
+        from plugins.search import _deliver_results
+
+        search_query = payload[len("getfile-"):].replace("-", " ").strip()
+        results = await search_files(search_query) if search_query else []
         if results:
-            # Fetch poster
-            poster = await fetch_poster(search_query)
-            
-            # Get display mode
-            settings = await get_settings()
-            mode = settings["result_mode"]
-            
-            # Build results
-            text = f"🔎 Results for <b>{html.escape(search_query)}</b> — found <b>{len(results)}</b>:"
-            
-            rows = []
-            if mode == "text":
-                lines = []
-                for doc in results:
-                    from database.filters_db import display_name
-                    label = html.escape(display_name(doc))
-                    url = f"https://t.me/{temp.U_NAME}?start=file_{doc['_id']}"
-                    lines.append(f'📁 <a href="{url}">{label}</a> • {human_size(doc.get("file_size", 0))}')
-                text = text + "\n\n" + "\n\n".join(lines)
-            else:
-                for doc in results:
-                    from database.filters_db import display_name
-                    label = f"{display_name(doc)} • {human_size(doc.get('file_size', 0))}"
-                    if len(label) > 60:
-                        label = label[:57] + "…"
-                    rows.append([InlineKeyboardButton(
-                        label, url=f"https://t.me/{temp.U_NAME}?start=file_{doc['_id']}"
-                    )])
-            
-            # Send poster if available
-            if poster:
-                from strings import POSTER_CAPTION_TXT
-                await message.reply_photo(
-                    poster["url"],
-                    caption=POSTER_CAPTION_TXT.format(query=html.escape(search_query)),
-                    quote=True,
-                )
-            
-            # Send results
-            markup = InlineKeyboardMarkup(rows) if rows else None
-            await message.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
+            await _deliver_results(message, search_query, results)
         else:
-            await message.reply_text(f"❌ No results found for <b>{search_query}</b>.", parse_mode="HTML")
+            await message.reply_text(f"❌ No results found for <b>{html.escape(search_query)}</b>.")
         return
 
     await message.reply_text(START_TXT.format(mention=message.from_user.mention))

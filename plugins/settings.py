@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import os
 import time
@@ -40,7 +41,7 @@ from strings import (
     MOVIE_UPDATE_MENU_HEADER,
     MOVIE_UPDATE_FETCH_HEADER, MOVIE_UPDATE_FETCH_ROW, MOVIE_UPDATE_FETCH_EMPTY,
     MOVIE_UPDATE_FETCH_ADDED, MOVIE_UPDATE_FETCH_REMOVED,
-    MOVIE_UPDATE_TEST_USAGE,
+    MOVIE_UPDATE_TEST_USAGE, MOVIE_UPDATE_FETCH_PROMPT, MOVIE_UPDATE_POST_TEST,
 )
 
 logger = logging.getLogger(__name__)
@@ -166,24 +167,27 @@ async def build_movie_update_menu(bot, settings: dict):
 
     async def _title(cid):
         try:
-            return (await bot.get_chat(cid)).title
-        except RPCError:
+            return (await bot.get_chat(cid)).title or str(cid)
+        except Exception:      # PeerIdInvalid / ChannelInvalid / etc. — never break the menu
             return str(cid)
 
     titles = await asyncio.gather(*[_title(c) for c in fetch_channels])
 
-    text = MOVIE_UPDATE_MENU_HEADER
+    enabled = settings.get("movie_update_notification", True)
+    text = MOVIE_UPDATE_MENU_HEADER.format(status=_status(enabled))
     if fetch_channels:
-        rows_txt = "".join(MOVIE_UPDATE_FETCH_ROW.format(title=t) for t in titles)
+        rows_txt = "".join(MOVIE_UPDATE_FETCH_ROW.format(title=html.escape(t)) for t in titles)
         text += "\n\n" + MOVIE_UPDATE_FETCH_HEADER + rows_txt
     else:
         text += "\n\n" + MOVIE_UPDATE_FETCH_EMPTY
 
-    rows = [
-        [InlineKeyboardButton(f"🗑 {title}", callback_data=f"cfg#mu_rm#{cid}")]
-        for cid, title in zip(fetch_channels, titles)
+    rows = [[InlineKeyboardButton(f"{_status(enabled)} — tap to toggle", callback_data="cfg#mu_tg")]]
+    rows += [
+        [InlineKeyboardButton(f"🗑 {t}", callback_data=f"cfg#mu_rm#{cid}")]
+        for cid, t in zip(fetch_channels, titles)
     ]
     rows.append([InlineKeyboardButton("➕ Add Fetch Channel", callback_data="cfg#mu_add")])
+    rows.append([InlineKeyboardButton(MOVIE_UPDATE_POST_TEST, callback_data="cfg#mu_test")])
     rows.append([InlineKeyboardButton("⬅️ Back", callback_data="cfg#main")])
     return text, InlineKeyboardMarkup(rows)
 
@@ -324,7 +328,7 @@ async def settings_callback(bot, query):
         await query.answer()
         await _run_channel_add(
             bot, query,
-            prompt_text=INDEX_ADD_PROMPT, not_channel_text=INDEX_ADD_NOT_CHANNEL,
+            prompt_text=MOVIE_UPDATE_FETCH_PROMPT, not_channel_text=INDEX_ADD_NOT_CHANNEL,
             not_admin_text=INDEX_ADD_NOT_ADMIN, ok_text=MOVIE_UPDATE_FETCH_ADDED,
             failed_text=INDEX_ADD_FAILED,
             add_fn=add_fetch_channel, build_menu_fn=build_movie_update_menu,
@@ -335,6 +339,16 @@ async def settings_callback(bot, query):
         channel_id = int(parts[2])
         settings = await remove_fetch_channel(channel_id)
         await query.answer(MOVIE_UPDATE_FETCH_REMOVED)
+        text, markup = await build_movie_update_menu(bot, settings)
+        await query.message.edit_text(text, reply_markup=markup)
+        return
+
+    if action == "mu_tg":
+        settings = await get_settings()
+        settings = await update_settings(
+            {"movie_update_notification": not settings.get("movie_update_notification", True)}
+        )
+        await query.answer()
         text, markup = await build_movie_update_menu(bot, settings)
         await query.message.edit_text(text, reply_markup=markup)
         return
