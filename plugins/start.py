@@ -1,7 +1,5 @@
 from pyrogram import Client, filters
 
-from config import ADMINS
-from database.filters_db import total_files
 from database.premium_db import get_premium
 from plugins.deliver import deliver_file
 from plugins.verify import handle_notcopy
@@ -46,12 +44,6 @@ async def start_cmd(bot, message):
 @Client.on_message(filters.command("help"))
 async def help_cmd(_, message):
     await message.reply_text(HELP_TXT)
-
-
-@Client.on_message(filters.command("stats") & filters.user(ADMINS))
-async def stats_cmd(_, message):
-    count = await total_files()
-    await message.reply_text(f"📁 <b>Indexed files:</b> <code>{count}</code>")
 
 
 @Client.on_message(filters.command("myplan"))
