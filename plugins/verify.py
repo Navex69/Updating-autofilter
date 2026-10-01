@@ -1,6 +1,7 @@
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from database.verify_db import consume_token, mark_verified
+from log_utils import log_user_verified
 from utils import temp
 from strings import VERIFY_DONE_TXT, VERIFY_GET_FILE_BTN, VERIFY_EXPIRED_TXT
 
@@ -12,6 +13,7 @@ async def handle_notcopy(bot, message, token: str):
         return
 
     await mark_verified(message.from_user.id, doc["tier"])
+    log_user_verified(message.from_user, doc["tier"])
 
     buttons = InlineKeyboardMarkup([[InlineKeyboardButton(
         VERIFY_GET_FILE_BTN, url=f"https://t.me/{temp.U_NAME}?start=file_{doc['file_id']}"
