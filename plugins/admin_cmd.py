@@ -19,9 +19,11 @@ ADMIN_PANEL_TXT = """<b>🔧 Admin Commands Panel</b>
 <b>• /admin</b> - Show this admin commands panel
 <b>• /settings</b> - Open admin settings panel
 
-<b>📚 Indexing:</b>
+<b>📚 Indexing & Stats:</b>
 <b>• /index</b> - Index an entire channel (auto + manual)
-<b>• /stats</b> - Show indexed file count
+<b>• /stats</b> - Full bot dashboard (channels, users, groups, DB, server)
+<b>• /delete</b> <code>file_link</code> - Delete one file (database or database + channel)
+<b>• /deleteall</b> - Delete all indexed files from MongoDB <i>(PM)</i>
 
 <b>🎬 Movie Updates:</b>
 <b>• /m title [year] [s02]</b> - Post a movie/series update (e.g. <code>/m pushpa 2</code>, <code>/m suits s02</code>)
@@ -29,6 +31,25 @@ ADMIN_PANEL_TXT = """<b>🔧 Admin Commands Panel</b>
 <b>💎 Premium Management:</b>
 <b>• /add_premium</b> - Add premium user
 <b>• /remove_premium</b> - Remove premium user
+
+<b>👤 User Management:</b>
+<b>• /id</b> - User info (reply, or <code>/id user_id</code>)
+<b>• /send</b> <code>id [id…]</code> - Reply to a message to send it to users
+<b>• /ban</b> <code>user_id</code> - Ban a user (asks for a reason)
+<b>• /unban</b> <code>user_id</code> - Unban a user
+<b>• /showban</b> - List banned users with reasons
+
+<b>📊 File Limit:</b>
+<b>• /checklimit</b> <code>user_id</code> - Check a user's free file usage
+<b>• /resetlimit</b> <code>user_id</code> - Reset one user's limit
+<b>• /resetlimitall</b> - Reset everyone's limit <i>(PM)</i>
+
+<b>👥 Groups & Broadcast:</b>
+<b>• /show_groups</b> - Groups where bot is admin <i>(PM)</i>
+<b>• /leave_groups</b> <code>group_id</code> - Make the bot leave a group
+<b>• /broadcast</b> - Reply to a message to send it to all users <i>(PM)</i>
+<b>• /syncusers</b> - Import old users into the broadcast list <i>(PM)</i>
+<b>• /extra</b> - Short list of the extra commands
 
 <b>🔗 Verification Setup:</b>
 <b>• /set_shortener</b> - Set verification shortener
@@ -43,7 +64,6 @@ async def admin_commands_panel(_, message):
     """Show admin commands panel with all available commands."""
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("⚙️ Settings Panel", callback_data="admin_settings")],
-        [InlineKeyboardButton("📚 Index Channels", callback_data="admin_index")],
         [InlineKeyboardButton("📊 View Stats", callback_data="admin_stats")],
     ])
     await message.reply_text(
@@ -65,12 +85,6 @@ async def admin_callbacks(bot, query):
         settings = await get_settings()
         await query.answer()
         await query.message.edit_text(SETTINGS_MAIN_TXT, reply_markup=build_main_menu(settings))
-        return
-
-    if action == "index":
-        # /index walks the admin through a private-chat conversation, so it
-        # can't be started from a button on someone else's message.
-        await query.answer("Send /index to me in a private chat to start indexing.", show_alert=True)
         return
 
     if action == "stats":
