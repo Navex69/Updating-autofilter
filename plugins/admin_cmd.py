@@ -4,18 +4,15 @@ Admin Commands Plugin
 Provides a unified /admin command that shows all available admin commands
 with descriptions in a formatted menu.
 """
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import ADMINS
-from strings import *
+from database.filters_db import total_files
+from database.settings_db import get_settings
+from strings import SETTINGS_MAIN_TXT
 
-
-@Client.on_message(filters.command("admin") & filters.user(ADMINS))
-async def admin_commands_panel(_, message):
-    """Show admin commands panel with all available commands."""
-    
-    text = """<b>🔧 Admin Commands Panel</b>
+ADMIN_PANEL_TXT = """<b>🔧 Admin Commands Panel</b>
 
 <b>📋 Available Commands:</b>
 
@@ -26,6 +23,9 @@ async def admin_commands_panel(_, message):
 <b>• /index</b> - Index an entire channel (auto + manual)
 <b>• /stats</b> - Show indexed file count
 
+<b>🎬 Movie Updates:</b>
+<b>• /m title [year] [s02]</b> - Post a movie/series update (e.g. <code>/m pushpa 2</code>, <code>/m suits s02</code>)
+
 <b>💎 Premium Management:</b>
 <b>• /add_premium</b> - Add premium user
 <b>• /remove_premium</b> - Remove premium user
@@ -35,42 +35,47 @@ async def admin_commands_panel(_, message):
 <b>• /set_verify_time</b> - Set verification time gaps
 <b>• /set_tutorial</b> - Set verification tutorial links
 
-<b>ℹ️ Note:</b> Movie update and request features are managed through the settings panel."""
-    
+<b>ℹ️ Note:</b> Auto movie updates, fetch channels and requests are managed through the settings panel."""
+
+
+@Client.on_message(filters.command("admin") & filters.user(ADMINS))
+async def admin_commands_panel(_, message):
+    """Show admin commands panel with all available commands."""
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚙️ Settings Panel", callback_data="settings_open")],
+        [InlineKeyboardButton("⚙️ Settings Panel", callback_data="admin_settings")],
         [InlineKeyboardButton("📚 Index Channels", callback_data="admin_index")],
         [InlineKeyboardButton("📊 View Stats", callback_data="admin_stats")],
     ])
-    
-    await message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await message.reply_text(
+        ADMIN_PANEL_TXT,
+        reply_markup=keyboard,
+        parse_mode=enums.ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
 
 
-@Client.on_callback_query(filters.regex(r"^admin_"))
+@Client.on_callback_query(filters.regex(r"^admin_") & filters.user(ADMINS))
 async def admin_callbacks(bot, query):
     """Handle admin panel callbacks."""
-    data = query.data.split("_")[1]
-    
-    if data == "index":
-        from plugins.index import index_cmd
-        # Create a fake message for the index command
-        fake_message = query.message
-        fake_message.text = "/index"
-        await index_cmd(bot, fake_message)
+    action = query.data.split("_", 1)[1]
+
+    if action == "settings":
+        # Imported lazily: settings.py is a sibling plugin.
+        from plugins.settings import build_main_menu
+        settings = await get_settings()
         await query.answer()
-        
-    elif data == "stats":
-        from plugins.start import stats_cmd
-        fake_message = query.message
-        fake_message.text = "/stats"
-        await stats_cmd(bot, fake_message)
-        await query.answer()
-        
-    elif data == "settings":
-        from plugins.settings import settings_cmd
-        fake_message = query.message
-        fake_message.text = "/settings"
-        await settings_cmd(bot, fake_message)
-        await query.answer()
-    
+        await query.message.edit_text(SETTINGS_MAIN_TXT, reply_markup=build_main_menu(settings))
+        return
+
+    if action == "index":
+        # /index walks the admin through a private-chat conversation, so it
+        # can't be started from a button on someone else's message.
+        await query.answer("Send /index to me in a private chat to start indexing.", show_alert=True)
+        return
+
+    if action == "stats":
+        count = await total_files()
+        await query.answer(f"Indexed files: {count}", show_alert=True)
+        return
+
     await query.answer()
