@@ -5,6 +5,7 @@ import logging
 import math
 import re
 import time
+from urllib.parse import quote_plus
 
 from pyrogram import Client, filters, enums
 from pyrogram.errors import RPCError
@@ -144,6 +145,46 @@ def _suggestion_keyboard(key: str, titles: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+# ── Request-to-admin button ─────────────────────────────────────────────────
+# callback_data is capped at 64 bytes by Telegram, so a button can never carry
+# the query text itself (long / non-ASCII / '#'-containing queries made the
+# whole not-found message fail to send). It carries a short key into this
+# cache instead.
+_REQUEST_CACHE: dict = {}
+
+
+def _request_cache_put(query: str) -> str:
+    if len(_REQUEST_CACHE) >= _CACHE_MAX_ENTRIES:
+        oldest = min(_REQUEST_CACHE, key=lambda k: _REQUEST_CACHE[k]["time"])
+        _REQUEST_CACHE.pop(oldest, None)
+    key = _cache_key(query)
+    _REQUEST_CACHE[key] = {"query": query, "time": time.time()}
+    return key
+
+
+def _request_cache_get(key: str) -> str | None:
+    entry = _REQUEST_CACHE.get(key)
+    if not entry:
+        return None
+    if time.time() - entry["time"] > 6 * 3600:
+        _REQUEST_CACHE.pop(key, None)
+        return None
+    return entry["query"]
+
+
+def _action_rows(query: str, user_id: int | None) -> list:
+    """The two buttons shown under every 'not found' / 'did you mean' message:
+    Google search (opens Google with the query) + Request to Admin."""
+    rows = [[InlineKeyboardButton(
+        "🔍 Search on Google",
+        url=f"https://www.google.com/search?q={quote_plus(query)}",
+    )]]
+    if REQUEST_CHANNEL and user_id:
+        key = _request_cache_put(query)
+        rows.append([InlineKeyboardButton(REQUEST_BTN_TXT, callback_data=f"req#{key}#{user_id}")])
+    return rows
+
+
 async def _schedule_auto_request(bot, status_message, query: str, user_id: int):
     """Schedule a file not found notification after timeout if user doesn't interact."""
     await asyncio.sleep(SUGGESTION_TIMEOUT)
@@ -155,12 +196,12 @@ async def _schedule_auto_request(bot, status_message, query: str, user_id: int):
             try:
                 # Get the actual user info from the bot
                 user = await bot.get_users(user_id)
-                mention = f"<a href='tg://user?id={user_id}'>{user.first_name}</a>"
+                mention = f"<a href='tg://user?id={user_id}'>{html.escape(user.first_name or str(user_id))}</a>"
                 text = (
                     "<b>#FILE_NOT_FOUND</b>\n\n"
                     f"👤 User: {mention}\n"
                     f"🆔 ID: <code>{user_id}</code>\n"
-                    f"🔍 Query: <code>{query}</code>"
+                    f"🔍 Query: <code>{html.escape(query)}</code>"
                 )
                 await bot.send_message(chat_id=NOT_FOUND_FILE_CHANNEL, text=text)
             except Exception:
@@ -423,39 +464,31 @@ async def handle_search(bot, message):
     # taps one.
     status = await _status_update(status, STATUS_STAGE3_TXT)
     suggestions = await suggest_titles(query)
+    user_id = message.from_user.id if message.from_user else None
+
+    rows = []
     if suggestions:
         key = _cache_key(query)
         _suggestion_cache_put(key, suggestions)
-        markup = _suggestion_keyboard(key, suggestions)
-    else:
-        markup = InlineKeyboardMarkup([])
-    
-    # Always add Google search and request buttons at the bottom
-    google_query = query.replace(' ', '+')
-    markup.inline_keyboard.append([InlineKeyboardButton(
-        "🔍 Search on Google",
-        url=f"https://www.google.com/search?q={google_query}"
-    )])
-    
-    if REQUEST_CHANNEL and message.from_user.id not in ADMINS:
-        markup.inline_keyboard.append([InlineKeyboardButton(
-            REQUEST_BTN_TXT,
-            callback_data=f"req#{query}#{message.from_user.id}"
-        )])
-    
+        rows.extend(_suggestion_keyboard(key, suggestions).inline_keyboard)
+    # Google search + Request to Admin under BOTH the suggestions message and
+    # the plain "not found" message.
+    rows.extend(_action_rows(query, user_id))
+    markup = InlineKeyboardMarkup(rows)
+
     if suggestions:
         await _status_update(status, SUGGESTIONS_HEADER_TXT.format(query=html.escape(query)), markup)
     else:
         await _status_update(status, NOT_FOUND_TXT.format(query=html.escape(query)), markup)
-    
+
     # Track for auto-request timeout
-    if REQUEST_CHANNEL and message.from_user.id not in ADMINS:
+    if REQUEST_CHANNEL and user_id and user_id not in ADMINS:
         _SUGGESTION_TRACKER[status.id] = {
             "clicked": False,
             "query": query,
-            "user_id": message.from_user.id
+            "user_id": user_id
         }
-        asyncio.create_task(_schedule_auto_request(bot, status, query, message.from_user.id))
+        asyncio.create_task(_schedule_auto_request(bot, status, query, user_id))
     
     return
 
@@ -546,7 +579,10 @@ async def suggestion_clicked(_, query):
     title = titles[int(idx)]
     results = await search_files(title)
     if not results:
-        await query.message.edit_text(SUGGESTION_NOT_FOUND_TXT.format(title=html.escape(title)))
+        await query.message.edit_text(
+            SUGGESTION_NOT_FOUND_TXT.format(title=html.escape(title)),
+            reply_markup=InlineKeyboardMarkup(_action_rows(title, query.from_user.id)),
+        )
         return
 
     await _deliver_results(query.message, title, results)
@@ -555,37 +591,46 @@ async def suggestion_clicked(_, query):
 
 @Client.on_callback_query(filters.regex(r"^req#"))
 async def request_button_clicked(bot, query):
-    """Handle the request button click."""
-    _, search_query, user_id = query.data.split("#")
-    user_id = int(user_id)
-    
-    # Only allow the user who clicked to trigger their own request
+    """'Request to Admin' button — sends the request to the request channel
+    (same thing /req does) and confirms to the user."""
+    try:
+        _, key, user_id = query.data.split("#")
+        user_id = int(user_id)
+    except ValueError:
+        await query.answer("⚠️ Invalid request button.", show_alert=True)
+        return
+
+    # Only the user the button was made for can trigger their own request
     if query.from_user.id != user_id:
         await query.answer("⚠️ This is not your request!", show_alert=True)
         return
-    
-    # Mark as clicked to prevent auto-request
-    _SUGGESTION_TRACKER.pop(query.message.id, None)
-    
+
     if not REQUEST_CHANNEL:
         await query.answer(REQUEST_NOT_CONFIGURED_TXT, show_alert=True)
         return
-    
+
+    search_query = _request_cache_get(key)
+    if not search_query:
+        await query.answer("⏳ This button expired — please search again.", show_alert=True)
+        return
+
     await query.answer("📮 Sending request to admin...")
-    
+
     # Import here to avoid circular dependency
     from plugins.request import send_request
-    
+
     username = query.from_user.username or query.from_user.first_name
     sent = await send_request(
         bot,
         user_id=user_id,
         query=search_query,
         username=username,
-        origin_message=query.message
+        origin_message=query.message.reply_to_message or query.message,
     )
-    
+
     if sent:
+        # The request is in — the auto "file not found" notice is no longer needed.
+        _SUGGESTION_TRACKER.pop(query.message.id, None)
         await query.message.edit_text(
             REQUEST_SENT_TXT.format(query=html.escape(search_query)),
             reply_markup=InlineKeyboardMarkup([
@@ -593,4 +638,5 @@ async def request_button_clicked(bot, query):
             ])
         )
     else:
-        await query.message.edit_text("❌ Failed to send request. Please try again later.")
+        # Keep the message and its buttons so the user can simply tap again.
+        await query.answer("❌ Couldn't send your request right now. Please try again.", show_alert=True)

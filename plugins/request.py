@@ -3,6 +3,8 @@ Request plugin - handles user file requests to admins.
 Follows the clean architecture pattern of this repo.
 """
 import asyncio
+import html
+import logging
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserIsBlocked
@@ -15,7 +17,9 @@ from strings import (
     NOT_AVAILABLE_TXT, YEAR_LANGUAGE_TXT, WRONG_SPELLING_TXT, CUSTOM_REPLY_TXT
 )
 
-# In-memory deduplication to prevent spam
+logger = logging.getLogger(__name__)
+
+# In-memory deduplication to prevent spam: user_id -> (key, sent request message)
 _REQUEST_DEDUP = {}
 # Track custom reply prompts
 _CUSTOM_REPLY_WAIT = {}
@@ -38,10 +42,12 @@ async def send_request(bot, user_id: int, query: str, username: str = None, orig
         return None
     
     # Deduplication check
+    # Same user asking for the same thing again → don't spam the channel, but
+    # hand back the original request so the user still gets their confirmation.
     dedup_key = f"{user_id}:{query.lower().strip()}"
-    if _REQUEST_DEDUP.get(user_id) == dedup_key:
-        return None
-    _REQUEST_DEDUP[user_id] = dedup_key
+    previous = _REQUEST_DEDUP.get(user_id)
+    if previous and previous[0] == dedup_key:
+        return previous[1]
     
     # Store in database
     username = username or f"ID: {user_id}"
@@ -49,7 +55,7 @@ async def send_request(bot, user_id: int, query: str, username: str = None, orig
     
     # Build buttons
     buttons = []
-    if origin_message and origin_message.chat.type in ("group", "supergroup"):
+    if origin_message and origin_message.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
         try:
             buttons.append([InlineKeyboardButton("👀 View Request", url=origin_message.link)])
         except Exception:
@@ -64,11 +70,11 @@ async def send_request(bot, user_id: int, query: str, username: str = None, orig
     )])
     
     # Send to request channel
-    user_mention = f"<a href='tg://user?id={user_id}'>{username}</a>"
+    user_mention = f"<a href='tg://user?id={user_id}'>{html.escape(str(username))}</a>"
     request_text = REQUEST_RECEIVED_TXT.format(
         user_mention=user_mention,
         user_id=user_id,
-        query=query
+        query=html.escape(query)
     )
     
     try:
@@ -77,9 +83,10 @@ async def send_request(bot, user_id: int, query: str, username: str = None, orig
             request_text,
             reply_markup=InlineKeyboardMarkup(buttons) if buttons else None
         )
+        _REQUEST_DEDUP[user_id] = (dedup_key, sent)   # only remembered once it really went out
         return sent
-    except Exception as e:
-        print(f"Failed to send request to channel: {e}")
+    except Exception:
+        logger.exception("Failed to send request to channel %s", REQUEST_CHANNEL)
         return None
 
 
@@ -575,7 +582,7 @@ async def manual_request_cmd(bot, message):
     
     if sent:
         await message.reply_text(
-            REQUEST_SENT_TXT.format(query=query),
+            REQUEST_SENT_TXT.format(query=html.escape(query)),
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✨ View Your Request ✨", url=sent.link)]
             ])
