@@ -27,7 +27,6 @@ USER_COMMANDS = [
     BotCommand("help", "How search works"),
     BotCommand("myplan", "Check your premium status"),
     BotCommand("req", "Request a file"),
-    BotCommand("request", "Request a file"),
 ]
 ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand("admin", "Admin commands panel"),
