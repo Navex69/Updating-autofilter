@@ -28,6 +28,7 @@ from config import (
 from database.movie_update_db import movie_update_db
 from database.filters_db import search_files
 from movie_metadata import get_movie_details, get_movie_detailsx
+from poster import fetch_poster
 from strings import MOVIE_UPDATE_NOTIFY_TXT, MANUAL_UPDATE_NOTIFY_TXT
 from utils import temp
 import aiohttp
@@ -461,20 +462,48 @@ def generate_movie_message(movie_doc, base_name):
 
 async def fetch_image(url: str, size: tuple = None) -> Optional[io.BytesIO]:
     """Download poster bytes and wrap them in a named BytesIO — Pyrogram's
-    send_photo cannot take raw `bytes`, only a path / URL / file object."""
-    try:
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    data = await response.read()
-                    if data:
-                        buf = io.BytesIO(data)
-                        buf.name = "poster.jpg"
-                        return buf
-    except Exception as e:
-        logger.error(f"Error fetching image: {e}")
+    send_photo cannot take raw `bytes`, only a path / URL / file object.
+    Retries once: TMDB's image CDN occasionally times out on a cold fetch."""
+    for attempt in range(2):
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.read()
+                        if data:
+                            buf = io.BytesIO(data)
+                            buf.name = "poster.jpg"
+                            return buf
+                    else:
+                        logger.warning("Poster download got HTTP %s for %s", response.status, url)
+        except Exception as e:
+            logger.warning("Poster download failed (attempt %d): %s", attempt + 1, e)
+        await asyncio.sleep(1)
     return None
+
+
+async def resolve_poster_url(title: str, year=None, details: dict = None, used_tmdb: bool = False) -> Optional[str]:
+    """Poster for a notification — found the SAME way as for a user's search
+    (poster.fetch_poster: TMDB backdrop → TMDB poster → OMDb), with the richer
+    metadata lookup only as a fallback. LANDSCAPE_POSTER=false prefers the
+    portrait image from the metadata lookup instead."""
+    details = details or {}
+    query = f"{title} {year}" if year else title
+
+    if not LANDSCAPE_POSTER and details.get("poster_url"):
+        return details["poster_url"]
+
+    for attempt in range(2):                       # one retry on a transient miss
+        poster = await fetch_poster(query)
+        if poster and poster.get("url"):
+            return poster["url"]
+        if attempt == 0:
+            await asyncio.sleep(1.5)
+
+    if used_tmdb and LANDSCAPE_POSTER and details.get("backdrop_url"):
+        return details["backdrop_url"]
+    return details.get("poster_url") or details.get("backdrop_url")
 
 
 def _build_markup(movie_doc) -> InlineKeyboardMarkup:
@@ -573,7 +602,16 @@ async def update_movie_message(bot, base_name):
             await send_movie_update(bot, base_name)
             return
 
-        for attempt in range(2):
+        # The first post went out without a poster (lookup missed). Try again
+        # now; if found, repost so the notification gets its image.
+        repost = False
+        if not movie_doc.get("poster_url"):
+            poster_url = await resolve_poster_url(movie_doc.get("display_name") or base_name, movie_doc.get("year"))
+            if poster_url:
+                await movie_update_db.update_movie_doc(base_name, {"$set": {"poster_url": poster_url}})
+                repost = True
+
+        for attempt in range(0 if repost else 2):
             try:
                 if is_photo:
                     await bot.edit_message_caption(
@@ -603,7 +641,8 @@ async def update_movie_message(bot, base_name):
                 logger.warning("Edit failed for %r (%s) — reposting", base_name, e)
                 break
         else:
-            return              # still rate-limited; the next file will retry
+            if not repost:
+                return          # still rate-limited; the next file will retry
 
         try:
             await bot.delete_messages(chat_id=MOVIE_UPDATE_CHANNEL, message_ids=message_id)
@@ -736,11 +775,7 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
     else:
         genres = "N/A"
 
-    # Get poster URL (landscape backdrop only when LANDSCAPE_POSTER is on)
-    if used_tmdb and LANDSCAPE_POSTER and details.get("backdrop_url"):
-        poster_url = details["backdrop_url"]
-    else:
-        poster_url = details.get("poster_url") or details.get("backdrop_url")
+    poster_url = await resolve_poster_url(title, media_info.get("year"), details, used_tmdb)
 
     info_url = details.get("imdb_url") or details.get("tmdb_url") or ""
 
@@ -1007,11 +1042,7 @@ async def manual_movie_update(bot, message):
         except (ValueError, TypeError):
             rating_display = str(rating_raw) if rating_raw else "N/A"
 
-        # Get poster URL
-        if used_tmdb and LANDSCAPE_POSTER and details.get("backdrop_url"):
-            poster_url = details["backdrop_url"]
-        else:
-            poster_url = details.get("poster_url") or details.get("backdrop_url")
+        poster_url = await resolve_poster_url(details.get("title") or title, year, details, used_tmdb)
 
         # Search DB for files
         pseudo_doc, db_files = await _build_manual_update_doc(title, year, season)
