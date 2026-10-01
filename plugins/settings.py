@@ -5,10 +5,10 @@ import os
 import time
 
 from pyrogram import Client, filters, enums
-from pyrogram.errors import RPCError
+from pyrogram.errors import RPCError, UserNotParticipant
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import ADMINS
+from config import ADMINS, MOVIE_UPDATE_CHANNEL
 from database.settings_db import (
     get_settings, update_settings, set_shortener, set_tutorial,
     add_fsub_channel, remove_fsub_channel,
@@ -41,7 +41,8 @@ from strings import (
     MOVIE_UPDATE_MENU_HEADER,
     MOVIE_UPDATE_FETCH_HEADER, MOVIE_UPDATE_FETCH_ROW, MOVIE_UPDATE_FETCH_EMPTY,
     MOVIE_UPDATE_FETCH_ADDED, MOVIE_UPDATE_FETCH_REMOVED,
-    MOVIE_UPDATE_TEST_USAGE, MOVIE_UPDATE_FETCH_PROMPT, MOVIE_UPDATE_POST_TEST,
+    MOVIE_UPDATE_FETCH_PROMPT, MOVIE_UPDATE_FETCH_LEGEND, MOVIE_UPDATE_WARN_NO_POST,
+    MOVIE_UPDATE_BOT_NOT_IN, MOVIE_UPDATE_BOT_NOT_ADMIN, MOVIE_UPDATE_BOT_CHECK_FAILED,
 )
 
 logger = logging.getLogger(__name__)
@@ -162,32 +163,79 @@ async def build_premium_menu(offset: int = 0):
     return text, InlineKeyboardMarkup(rows)
 
 
+async def _bot_channel_access(bot, chat_id):
+    """Check the bot's real standing in a channel.
+    Returns (state, member, error): state is "ok" | "not_member" | "not_admin" | "error"."""
+    try:
+        member = await bot.get_chat_member(chat_id, bot.me.id)
+    except UserNotParticipant:
+        return "not_member", None, None
+    except RPCError as exc:
+        return "error", None, exc
+    if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+        return "ok", member, None
+    return "not_admin", member, None
+
+
+async def _verify_fetch_channel(bot, chat):
+    """Used when an admin adds a fetch channel: returns an error text, or None if fine."""
+    title = html.escape(chat.title or str(chat.id))
+    state, _, error = await _bot_channel_access(bot, chat.id)
+    if state == "not_member":
+        return MOVIE_UPDATE_BOT_NOT_IN.format(title=title)
+    if state == "not_admin":
+        return MOVIE_UPDATE_BOT_NOT_ADMIN.format(title=title)
+    if state == "error":
+        return MOVIE_UPDATE_BOT_CHECK_FAILED.format(title=title, error=html.escape(str(error)))
+    return None
+
+
+async def _can_post_in_update_channel(bot) -> bool:
+    if not MOVIE_UPDATE_CHANNEL:
+        return False
+    state, member, _ = await _bot_channel_access(bot, MOVIE_UPDATE_CHANNEL)
+    if state != "ok":
+        return False
+    if member.status == enums.ChatMemberStatus.OWNER:
+        return True
+    return bool(member.privileges and member.privileges.can_post_messages)
+
+
 async def build_movie_update_menu(bot, settings: dict):
     fetch_channels = list(settings.get("fetch_movie_update_channels", []))
 
-    async def _title(cid):
+    async def _info(cid):
         try:
-            return (await bot.get_chat(cid)).title or str(cid)
+            title = (await bot.get_chat(cid)).title or str(cid)
         except Exception:      # PeerIdInvalid / ChannelInvalid / etc. — never break the menu
-            return str(cid)
+            title = str(cid)
+        state, _, _ = await _bot_channel_access(bot, cid)
+        return title, state == "ok"
 
-    titles = await asyncio.gather(*[_title(c) for c in fetch_channels])
+    infos = await asyncio.gather(*[_info(c) for c in fetch_channels])
+    can_post = await _can_post_in_update_channel(bot)
 
     enabled = settings.get("movie_update_notification", True)
     text = MOVIE_UPDATE_MENU_HEADER.format(status=_status(enabled))
     if fetch_channels:
-        rows_txt = "".join(MOVIE_UPDATE_FETCH_ROW.format(title=html.escape(t)) for t in titles)
+        rows_txt = "".join(
+            MOVIE_UPDATE_FETCH_ROW.format(icon="✅" if ok else "⚠️", title=html.escape(t))
+            for t, ok in infos
+        )
         text += "\n\n" + MOVIE_UPDATE_FETCH_HEADER + rows_txt
+        if not all(ok for _, ok in infos):
+            text += MOVIE_UPDATE_FETCH_LEGEND
     else:
         text += "\n\n" + MOVIE_UPDATE_FETCH_EMPTY
+    if not can_post:
+        text += MOVIE_UPDATE_WARN_NO_POST
 
     rows = [[InlineKeyboardButton(f"{_status(enabled)} — tap to toggle", callback_data="cfg#mu_tg")]]
     rows += [
-        [InlineKeyboardButton(f"🗑 {t}", callback_data=f"cfg#mu_rm#{cid}")]
-        for cid, t in zip(fetch_channels, titles)
+        [InlineKeyboardButton(f"🗑 {'' if ok else '⚠️ '}{t}", callback_data=f"cfg#mu_rm#{cid}")]
+        for cid, (t, ok) in zip(fetch_channels, infos)
     ]
     rows.append([InlineKeyboardButton("➕ Add Fetch Channel", callback_data="cfg#mu_add")])
-    rows.append([InlineKeyboardButton(MOVIE_UPDATE_POST_TEST, callback_data="cfg#mu_test")])
     rows.append([InlineKeyboardButton("⬅️ Back", callback_data="cfg#main")])
     return text, InlineKeyboardMarkup(rows)
 
@@ -332,6 +380,7 @@ async def settings_callback(bot, query):
             not_admin_text=INDEX_ADD_NOT_ADMIN, ok_text=MOVIE_UPDATE_FETCH_ADDED,
             failed_text=INDEX_ADD_FAILED,
             add_fn=add_fetch_channel, build_menu_fn=build_movie_update_menu,
+            verify_fn=_verify_fetch_channel,
         )
         return
 
@@ -351,10 +400,6 @@ async def settings_callback(bot, query):
         await query.answer()
         text, markup = await build_movie_update_menu(bot, settings)
         await query.message.edit_text(text, reply_markup=markup)
-        return
-
-    if action == "mu_test":
-        await query.answer(MOVIE_UPDATE_TEST_USAGE, show_alert=True)
         return
 
     if action == "ask":
@@ -403,7 +448,7 @@ async def _resolve_channel(bot, reply):
 
 
 async def _run_channel_add(bot, query, *, prompt_text, not_channel_text, not_admin_text,
-                            ok_text, failed_text, add_fn, build_menu_fn):
+                            ok_text, failed_text, add_fn, build_menu_fn, verify_fn=None):
     prompt = await query.message.edit_text(prompt_text)
     try:
         reply = await bot.listen(chat_id=query.message.chat.id, user_id=query.from_user.id, timeout=90)
@@ -426,14 +471,18 @@ async def _run_channel_add(bot, query, *, prompt_text, not_channel_text, not_adm
         await prompt.edit_text(not_channel_text + "\n\n" + text, reply_markup=markup)
         return
 
-    if not await is_bot_admin_in(bot, chat.id):
+    if verify_fn:
+        problem = await verify_fn(bot, chat)
+    else:
+        problem = None if await is_bot_admin_in(bot, chat.id) else not_admin_text
+    if problem:
         text, markup = await build_menu_fn(bot, settings)
-        await prompt.edit_text(not_admin_text + "\n\n" + text, reply_markup=markup)
+        await prompt.edit_text(problem + "\n\n" + text, reply_markup=markup)
         return
 
     settings = await add_fn(chat.id)
     text, markup = await build_menu_fn(bot, settings)
-    await prompt.edit_text(ok_text.format(title=chat.title) + "\n\n" + text, reply_markup=markup)
+    await prompt.edit_text(ok_text.format(title=html.escape(chat.title or str(chat.id))) + "\n\n" + text, reply_markup=markup)
 
 
 async def _run_ask_number(bot, query, field: str):
