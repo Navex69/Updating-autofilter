@@ -23,7 +23,7 @@ from database.stream_db import (
     get_bin_entry, save_bin_entry, add_usage, get_daily, increment_daily,
 )
 from fastdl.hosts import choose_host
-from fastdl.links import build_url, ready_markup
+from fastdl.links import build_url, is_video, ready_markup
 from strings import (
     FILE_NOT_FOUND_TXT, FAST_LINK_READY_TXT, FAST_LIMIT_REACHED_TXT,
     FAST_UNAVAILABLE_TXT, FAST_ERROR_TXT,
@@ -79,8 +79,14 @@ async def fast_download(bot, query):
             await _answer(query, FAST_UNAVAILABLE_TXT, True)
             return
 
-        url = build_url(host.base_url, entry["bin_msg_id"], user_id, entry.get("name", "file"))
-        await query.message.edit_reply_markup(ready_markup(file_id, url))
+        name = entry.get("name", "file")
+        url = build_url(host.base_url, entry["bin_msg_id"], user_id, name)
+        watch_url = None
+        if is_video(name, doc.get("mime_type", "")):
+            # Same token, same host: one link counts once against quota and bandwidth.
+            token = url.split("/dl/", 1)[1].split("/", 1)[0]
+            watch_url = f"{host.base_url}/watch/{token}/{url.rsplit('/', 1)[1]}"
+        await query.message.edit_reply_markup(ready_markup(file_id, url, watch_url))
         await add_usage(host.key, size)
         await increment_daily(user_id)
         await _answer(query, FAST_LINK_READY_TXT.format(hours=STREAM_LINK_TTL_HOURS))

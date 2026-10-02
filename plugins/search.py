@@ -355,6 +355,13 @@ async def _expired(message):
 def _search_filter(_, __, message):
     if not message.text or message.text.startswith("/"):
         return False
+    # The bot's own messages (restart notice, "Searching..." status, results)
+    # come back to it as updates — they must never be treated as a query, or
+    # every reply the bot sends triggers another search. Only real users and
+    # admins can search.
+    sender = message.from_user
+    if message.outgoing or (sender and (sender.is_self or sender.is_bot)):
+        return False
     if message.chat.type == enums.ChatType.PRIVATE:
         return ENABLE_PM_SEARCH
     return message.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP)
