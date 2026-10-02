@@ -249,9 +249,20 @@ USER_VERIFIED_LOG_TXT = """#UserVerified
 # ── Fast Download ─────────────────────────────────────────────────────────────
 FAST_DOWNLOAD_BTN = "⚡ Fast Download"
 FAST_DOWNLOAD_LINK_BTN = "⬇️ Download"
-FAST_NEW_LINK_BTN = "🔄 New Link"
-FAST_LINK_READY_TXT = "✅ Link ready — tap Download. It works for {hours} hours."
+FAST_LINK_READY_TXT = (
+    "✅ Your link is ready!\n\n"
+    "⏳ Valid for {hours} hours, then it expires.\n"
+    "🔒 Personal link — please don't share it.\n\n"
+    "Tap Download or Watch below."
+)
 FAST_LIMIT_REACHED_TXT = "⚠️ You've used all {limit} fast-download links for today. Try again tomorrow."
 FAST_UNAVAILABLE_TXT = "⚠️ Fast download is busy right now. Please use the file above."
 FAST_ERROR_TXT = "❌ Couldn't create the link. Please try again in a moment."
 FAST_WATCH_BTN = "▶️ Watch"
+
+# Posted in BIN_CHANNEL (as a reply to the file) every time a link is generated.
+BIN_USER_INFO_TXT = """📥 <b>Fast download link generated</b>
+
+📁 <b>File:</b> <code>{file_name}</code>
+🆔 <b>User ID:</b> <code>{user_id}</code>
+👤 <b>User:</b> {user_link}"""
