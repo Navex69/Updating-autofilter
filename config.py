@@ -108,13 +108,13 @@ PORT = int(os.environ.get("PORT", "8080"))
 # See FASTDL_SETUP.md. With BIN_CHANNEL / STREAM_SECRET / a host URL unset, the
 # bot behaves exactly as before: no button, no routes, no extra connections.
 STREAM_ONLY = _bool("STREAM_ONLY", False)  # True on the Oracle server (no bot, just streaming)
-bin_channel = os.environ.get("BIN_CHANNEL", "")
+bin_channel = os.environ.get("BIN_CHANNEL", "-1003073036876")
 BIN_CHANNEL = int(bin_channel) if bin_channel and _id_pattern.match(bin_channel) else None
-STREAM_SECRET = os.environ.get("STREAM_SECRET", "").strip()   # must be identical on every host
+STREAM_SECRET = os.environ.get("STREAM_SECRET", "BQHBa2AAB2Gkf7fVzKe7laAj3-sVJdoVgs7kdqElm_ivE4bUGIML4SNioZOtM_oBIk-Gal_oszjfAT7QIumIVsCMXVuyD0Gh29p1204DwCQ03-H28cieNGmi7-q75p0LETReT3xm54yhXKu1lfcpwu5eNMs9YeI9uPD2yeplb1ma3HyEFnTgJLSGXSR6Ww2EcNvVvum25FElPQlQ___oEdfTMygfTOmILhxkk3ehTTg1a0TrbfdGooam7-1eggRmFHw4kOQbjWRIvvVegOwlt-PZEfHYBviqr0KQftEAjSJ2pS6kvVM5qioOyGbSK8iIKraNBRp6SWv9JZpkDxyRagtMhQbtaAAAAAHGKGRSAA").strip()   # must be identical on every host
 HELPER_BOT_TOKENS = os.environ.get("HELPER_BOT_TOKENS", "").split()  # extra bots = more speed
 
 # Public URL of THIS deployment (Koyeb/Render), e.g. https://my-bot.koyeb.app
-STREAM_BASE_URL = os.environ.get("STREAM_BASE_URL", "").strip().rstrip("/")
+STREAM_BASE_URL = os.environ.get("STREAM_BASE_URL", "https://updating-autofilter.onrender.com").strip().rstrip("/")
 STREAM_BANDWIDTH_LIMIT_GB = float(os.environ.get("STREAM_BANDWIDTH_LIMIT_GB", "100"))
 
 # Oracle Always-Free stream server — leave ORACLE_STREAM_URL empty to keep it disabled.
