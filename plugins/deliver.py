@@ -29,6 +29,7 @@ from database.settings_db import get_settings
 from database.verify_db import required_tier, create_token
 from database.limit_db import get_today_count, increment_today
 from plugins.force_sub import missing_channels
+from fastdl.links import start_button_markup
 from shortlink import make_short_link
 from utils import temp
 from strings import (
@@ -98,7 +99,10 @@ async def _send_file(bot, user_id: int, doc: dict, remaining: tuple | None = Non
         caption = FILE_SEND_CAPTION.format(file_name=name)
 
     try:
-        sent = await bot.send_cached_media(chat_id=user_id, file_id=doc["file_id"], caption=caption)
+        sent = await bot.send_cached_media(
+            chat_id=user_id, file_id=doc["file_id"], caption=caption,
+            reply_markup=start_button_markup(str(doc["_id"])),
+        )
     except RPCError:
         logger.exception("Failed to deliver file %s to %s", doc.get("_id"), user_id)
         await bot.send_message(user_id, FILE_NOT_FOUND_TXT)
