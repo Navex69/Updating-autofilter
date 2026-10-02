@@ -140,7 +140,7 @@ def _suggestion_cache_get(key: str) -> list | None:
 def _suggestion_keyboard(key: str, titles: list) -> InlineKeyboardMarkup:
     rows = []
     for i, title in enumerate(titles):
-        label = title if len(title) <= 60 else title[:57] + "…"
+        label = "🎬 " + (title if len(title) <= 55 else title[:52] + "…")
         rows.append([InlineKeyboardButton(label, callback_data=f"sug#{key}#{i}")])
     return InlineKeyboardMarkup(rows)
 
@@ -253,7 +253,7 @@ def _nav_row(key: str, offset: int, total: int) -> list:
     current_page = offset // RESULTS_PER_PAGE + 1
     nav = [InlineKeyboardButton("⬅️", callback_data=f"pg#{key}#{max(0, offset - RESULTS_PER_PAGE)}")] \
         if offset > 0 else []
-    nav.append(InlineKeyboardButton(f"{current_page}/{total_pages}", callback_data="noop"))
+    nav.append(InlineKeyboardButton(f"📄 {current_page}/{total_pages}", callback_data="noop"))
     if offset + RESULTS_PER_PAGE < total:
         nav.append(InlineKeyboardButton("➡️", callback_data=f"pg#{key}#{offset + RESULTS_PER_PAGE}"))
     return nav
@@ -297,6 +297,7 @@ def _render(key: str, entry: dict, offset: int):
         text = header
         for doc in page:
             label = f"{_strip_tags(display_name(doc))} • {human_size(doc.get('file_size', 0))}"
+            label = "📁 " + label
             if len(label) > 60:
                 label = label[:57] + "…"
             rows.append([InlineKeyboardButton(
