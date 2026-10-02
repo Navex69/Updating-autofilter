@@ -1,12 +1,13 @@
 """
 "⚡ Fast Download" button handler. The button sits under every delivered file
-(added in deliver._send_file, only when the feature is configured). A tap:
+(added in deliver._send_file, only when the feature is configured). A tap shows
+the validity popup INSTANTLY (after a quick quota check) and builds the link in
+the background, so the user never waits on Telegram or the database:
   1. checks the user's daily link quota,
   2. makes sure the file has a live copy in BIN_CHANNEL (copied once, reused;
      re-copied automatically if the copy was deleted or BIN_CHANNEL changed),
   3. picks a host (Oracle first, Koyeb/Render as fallback),
-  4. swaps the button for Download (+ Watch for videos) links and shows a popup
-     explaining the link's validity,
+  4. swaps the button for Download (+ Watch for videos) links,
   5. logs who generated the link in BIN_CHANNEL, as a reply to the file.
 Delivery itself and all its gates (premium / force-sub / limit / verify) are
 untouched — this only runs after the file has already been delivered.
@@ -30,7 +31,7 @@ from database.stream_db import (
 from fastdl.hosts import choose_host
 from fastdl.links import build_url, is_video, ready_markup
 from strings import (
-    FILE_NOT_FOUND_TXT, FAST_LINK_READY_TXT, FAST_LIMIT_REACHED_TXT,
+    FILE_NOT_FOUND_TXT, FAST_GENERATING_TXT, FAST_LIMIT_REACHED_TXT,
     FAST_UNAVAILABLE_TXT, FAST_ERROR_TXT, BIN_USER_INFO_TXT,
 )
 
@@ -92,29 +93,23 @@ async def _log_user_in_bin(bot, entry: dict, doc: dict, user):
         logger.warning("Couldn't post user info to BIN_CHANNEL", exc_info=True)
 
 
-@Client.on_callback_query(filters.regex(r"^fdl#"))
-async def fast_download(bot, query):
-    if not FASTDL_ENABLED:
-        await _answer(query, "Fast download isn't available.", True)
-        return
-
-    file_id = query.data.split("#", 1)[1]
-    user = query.from_user
-    user_id = user.id
-    key = (user_id, file_id)
-    if key in _busy:
-        await _answer(query, "⏳ Working on it...")
-        return
-    _busy.add(key)
+async def _fail(query, text: str):
+    """The popup was already used up, so problems after it are shown as a short
+    reply under the file (auto-deleted). The Fast Download button stays, so the
+    user can simply tap it again."""
     try:
-        limit = STREAM_PREMIUM_DAILY_LIMIT if await has_premium_access(user_id) else STREAM_DAILY_LIMIT
-        if await get_daily(user_id) >= limit:
-            await _answer(query, FAST_LIMIT_REACHED_TXT.format(limit=limit), True)
-            return
+        note = await query.message.reply_text(text, quote=True)
+        await asyncio.sleep(10)
+        await note.delete()
+    except Exception:
+        pass
 
+
+async def _generate(bot, query, file_id: str, user, key):
+    try:
         doc = await get_file_by_id(file_id)
         if not doc:
-            await _answer(query, FILE_NOT_FOUND_TXT, True)
+            await _fail(query, FILE_NOT_FOUND_TXT)
             return
 
         entry = await get_bin_entry(file_id)
@@ -124,11 +119,11 @@ async def fast_download(bot, query):
         size = int(entry.get("size") or 0)
         host = await choose_host(size)
         if not host:
-            await _answer(query, FAST_UNAVAILABLE_TXT, True)
+            await _fail(query, FAST_UNAVAILABLE_TXT)
             return
 
         name = entry.get("name") or "file"
-        url = build_url(host.base_url, entry["bin_msg_id"], user_id, name)
+        url = build_url(host.base_url, entry["bin_msg_id"], user.id, name)
         watch_url = None
         if is_video(name, doc.get("mime_type", "")):
             # Same token, same host: one link counts once against quota and bandwidth.
@@ -137,16 +132,36 @@ async def fast_download(bot, query):
 
         await query.message.edit_reply_markup(ready_markup(url, watch_url))
         await add_usage(host.key, size)
-        await increment_daily(user_id)
-
-        task = asyncio.create_task(_log_user_in_bin(bot, entry, doc, user))
-        _tasks.add(task)
-        task.add_done_callback(_tasks.discard)
-
-        # Popup: explains validity, then the user sees the Download / Watch buttons.
-        await _answer(query, FAST_LINK_READY_TXT.format(hours=STREAM_LINK_TTL_HOURS), True)
+        await increment_daily(user.id)
+        await _log_user_in_bin(bot, entry, doc, user)
     except Exception:
-        logger.exception("Fast download failed for file %s (user %s)", file_id, user_id)
-        await _answer(query, FAST_ERROR_TXT, True)
+        logger.exception("Fast download failed for file %s (user %s)", file_id, user.id)
+        await _fail(query, FAST_ERROR_TXT)
     finally:
         _busy.discard(key)
+
+
+@Client.on_callback_query(filters.regex(r"^fdl#"))
+async def fast_download(bot, query):
+    if not FASTDL_ENABLED:
+        await _answer(query, "Fast download isn't available.", True)
+        return
+
+    file_id = query.data.split("#", 1)[1]
+    user = query.from_user
+    key = (user.id, file_id)
+    if key in _busy:
+        await _answer(query, "⏳ Working on it...")
+        return
+
+    limit = STREAM_PREMIUM_DAILY_LIMIT if await has_premium_access(user.id) else STREAM_DAILY_LIMIT
+    if await get_daily(user.id) >= limit:
+        await _answer(query, FAST_LIMIT_REACHED_TXT.format(limit=limit), True)
+        return
+
+    # Popup first — the user reads it while the link is built in the background.
+    _busy.add(key)
+    await _answer(query, FAST_GENERATING_TXT.format(hours=STREAM_LINK_TTL_HOURS), True)
+    task = asyncio.create_task(_generate(bot, query, file_id, user, key))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
