@@ -6,6 +6,7 @@ the standalone Oracle server (stream_server.py).
   GET      /health                  — lets the bot check this host is up
 """
 import asyncio
+import html
 import logging
 import re
 from urllib.parse import quote
@@ -54,12 +55,21 @@ def parse_range(header: str | None, size: int):
     return start, end, True
 
 
-def _disposition(name: str) -> str:
+def _disposition(name: str, inline: bool = False) -> str:
     ascii_name = re.sub(r'[^\w.\- ]', "_", name.encode("ascii", "ignore").decode()) or "file"
-    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name, safe='')}"
+    kind = "inline" if inline else "attachment"
+    return f"{kind}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name, safe='')}"
 
 
 async def handle_download(request: web.Request):
+    return await _serve(request, inline=False)
+
+
+async def handle_stream(request: web.Request):
+    return await _serve(request, inline=True)
+
+
+async def _serve(request: web.Request, inline: bool):
     global _active_total
     token = request.match_info["token"]
     parsed = verify_token(STREAM_SECRET, token)
@@ -96,8 +106,8 @@ async def handle_download(request: web.Request):
 
     length = end - start + 1
     headers = {
-        "Content-Type": "application/octet-stream",
-        "Content-Disposition": _disposition(meta.name),
+        "Content-Type": (meta.mime if inline and meta.mime.startswith("video/") else "application/octet-stream"),
+        "Content-Disposition": _disposition(meta.name, inline),
         "Accept-Ranges": "bytes",
         "ETag": etag,
         "Cache-Control": "private, no-store",
@@ -142,6 +152,47 @@ async def handle_download(request: web.Request):
             _active_by_token[token] = left
 
 
+_WATCH_HTML = """<!doctype html><html><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><title>{title}</title>
+<style>body{{margin:0;background:#0f0f10;color:#eee;font-family:system-ui,sans-serif}}
+.w{{max-width:960px;margin:auto;padding:12px}}video{{width:100%;max-height:75vh;background:#000;border-radius:8px}}
+h1{{font-size:15px;font-weight:600;word-break:break-word;margin:8px 0}}
+.b{{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}}
+.b a{{background:#2a2a2d;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-size:14px}}
+p{{color:#aaa;font-size:13px;line-height:1.5}}</style></head><body><div class=w>
+<h1>{title}</h1>
+<video id=v controls playsinline preload=metadata src="{stream}"></video>
+<div class=b>
+<a href="{vlc}">Open in VLC</a>
+<a href="{mx}">Open in MX Player</a>
+<a href="{dl}">Download</a></div>
+<p>If the video doesn't play here (common with MKV, HEVC/x265 or AC3/DTS audio), use
+<b>Open in VLC</b> or <b>Open in MX Player</b> — they play almost every format and stream
+the same link.</p></div></body></html>"""
+
+
+async def handle_watch(request: web.Request):
+    token = request.match_info["token"]
+    if not verify_token(STREAM_SECRET, token):
+        return web.Response(text=_EXPIRED_HTML, status=403, content_type="text/html")
+    name = request.match_info.get("name") or "video"
+    base = f"{request.scheme}://{request.host}"
+    # Behind Caddy / Render / Koyeb the browser-facing scheme is https.
+    if request.headers.get("X-Forwarded-Proto") == "https":
+        base = f"https://{request.host}"
+    qname = quote(name, safe="")
+    stream = f"/stream/{token}/{qname}"
+    full = f"{base}{stream}"
+    mx = "intent:" + full.split("://", 1)[1] + "#Intent;scheme=" + full.split("://", 1)[0] + \
+         ";package=com.mxtech.videoplayer.ad;type=video/*;end"
+    html_page = _WATCH_HTML.format(
+        title=html.escape(name), stream=stream, dl=f"/dl/{token}/{qname}",
+        vlc=f"vlc://{full}", mx=html.escape(mx),
+    )
+    return web.Response(text=html_page, content_type="text/html",
+                        headers={"Cache-Control": "private, no-store"})
+
+
 async def handle_health(_request: web.Request):
     return web.Response(text="ok")
 
@@ -150,5 +201,7 @@ def register_routes(app: web.Application):
     app.add_routes([
         web.get("/dl/{token}/{name:.*}", handle_download),
         web.get("/dl/{token}", handle_download),
+        web.get("/stream/{token}/{name:.*}", handle_stream),
+        web.get("/watch/{token}/{name:.*}", handle_watch),
         web.get("/health", handle_health),
     ])
