@@ -22,12 +22,15 @@ async def get_bin_entry(file_id: str) -> dict | None:
     return await bin_col.find_one({"_id": file_id})
 
 
-async def save_bin_entry(file_id: str, bin_msg_id: int, size: int, name: str) -> dict:
+async def save_bin_entry(file_id: str, bin_msg_id: int, bin_chat: int, size: int, name: str,
+                         replace: bool = False) -> dict:
     """First writer wins, so two simultaneous clicks on a new file end up
-    sharing one BIN copy instead of fighting over it."""
+    sharing one BIN copy. replace=True overwrites a dead entry (copy deleted
+    from the channel, or BIN_CHANNEL changed)."""
+    fields = {"bin_msg_id": bin_msg_id, "bin_chat": bin_chat, "size": size, "name": name}
     return await bin_col.find_one_and_update(
         {"_id": file_id},
-        {"$setOnInsert": {"bin_msg_id": bin_msg_id, "size": size, "name": name}},
+        {"$set": fields} if replace else {"$setOnInsert": fields},
         upsert=True,
         return_document=ReturnDocument.AFTER,
     )
