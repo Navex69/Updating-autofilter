@@ -4,7 +4,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import FASTDL_ENABLED, STREAM_SECRET, STREAM_LINK_TTL_HOURS
 from fastdl.tokens import make_token
-from strings import FAST_DOWNLOAD_BTN, FAST_DOWNLOAD_LINK_BTN, FAST_NEW_LINK_BTN, FAST_WATCH_BTN
+from strings import FAST_DOWNLOAD_BTN, FAST_DOWNLOAD_LINK_BTN, FAST_WATCH_BTN
 
 
 def start_button_markup(file_id: str) -> InlineKeyboardMarkup | None:
@@ -22,11 +22,11 @@ def is_video(name: str, mime: str = "") -> bool:
     return (mime or "").startswith("video/") or (name or "").lower().endswith(_VIDEO_EXT)
 
 
-def ready_markup(file_id: str, download_url: str, watch_url: str | None = None) -> InlineKeyboardMarkup:
+def ready_markup(download_url: str, watch_url: str | None = None) -> InlineKeyboardMarkup:
     row = [InlineKeyboardButton(FAST_DOWNLOAD_LINK_BTN, url=download_url)]
     if watch_url:
         row.append(InlineKeyboardButton(FAST_WATCH_BTN, url=watch_url))
-    return InlineKeyboardMarkup([row, [InlineKeyboardButton(FAST_NEW_LINK_BTN, callback_data=f"fdl#{file_id}")]])
+    return InlineKeyboardMarkup([row])
 
 
 def build_url(base_url: str, msg_id: int, user_id: int, filename: str, kind: str = "dl") -> str:
