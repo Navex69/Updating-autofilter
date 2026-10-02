@@ -5,7 +5,10 @@ from pyrogram import Client
 from pyrogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from pyrogram.errors import PeerIdInvalid
 
-from config import API_ID, API_HASH, BOT_TOKEN, PORT, ADMINS
+from config import (
+    API_ID, API_HASH, BOT_TOKEN, PORT, ADMINS,
+    BIN_CHANNEL, HELPER_BOT_TOKENS, FASTDL_SERVER_ENABLED,
+)
 from database.filters_db import ensure_indexes
 from database.premium_db import ensure_indexes as ensure_premium_indexes
 from database.verify_db import ensure_indexes as ensure_verify_indexes
@@ -15,6 +18,7 @@ from database.movie_update_db import movie_update_db
 from log_utils import schedule_restart_notice
 from utils import temp
 from web import web_app
+from fastdl.pool import pool as stream_pool
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +68,13 @@ class Bot(Client):
 
         await self._setup_commands()
 
+        if FASTDL_SERVER_ENABLED:
+            # Second session of the main token + any helper bots, download-only.
+            try:
+                await stream_pool.start(API_ID, API_HASH, [BOT_TOKEN] + HELPER_BOT_TOKENS, BIN_CHANNEL)
+            except Exception:
+                logger.exception("Fast-download pool failed to start — bot continues without it")
+
         runner = web.AppRunner(web_app)
         await runner.setup()
         await web.TCPSite(runner, "0.0.0.0", PORT).start()
@@ -91,6 +102,7 @@ class Bot(Client):
                 logger.warning("Couldn't set the admin command menu for %s", admin_id, exc_info=True)
 
     async def stop(self, *args):
+        await stream_pool.stop()
         await super().stop()
         logger.info("Bot stopped.")
 

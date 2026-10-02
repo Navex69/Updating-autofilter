@@ -104,13 +104,47 @@ LANDSCAPE_POSTER = _bool("LANDSCAPE_POSTER", True)  # Shows landscape poster
 # ── Web server (Koyeb requires the app to bind $PORT) ────────────────────────
 PORT = int(os.environ.get("PORT", "8080"))
 
+# ── Fast Download (optional — fully disabled until configured) ───────────────
+# See FASTDL_SETUP.md. With BIN_CHANNEL / STREAM_SECRET / a host URL unset, the
+# bot behaves exactly as before: no button, no routes, no extra connections.
+STREAM_ONLY = _bool("STREAM_ONLY", False)  # True on the Oracle server (no bot, just streaming)
+bin_channel = os.environ.get("BIN_CHANNEL", "")
+BIN_CHANNEL = int(bin_channel) if bin_channel and _id_pattern.match(bin_channel) else None
+STREAM_SECRET = os.environ.get("STREAM_SECRET", "").strip()   # must be identical on every host
+HELPER_BOT_TOKENS = os.environ.get("HELPER_BOT_TOKENS", "").split()  # extra bots = more speed
+
+# Public URL of THIS deployment (Koyeb/Render), e.g. https://my-bot.koyeb.app
+STREAM_BASE_URL = os.environ.get("STREAM_BASE_URL", "").strip().rstrip("/")
+STREAM_BANDWIDTH_LIMIT_GB = float(os.environ.get("STREAM_BANDWIDTH_LIMIT_GB", "100"))
+
+# Oracle Always-Free stream server — leave ORACLE_STREAM_URL empty to keep it disabled.
+ORACLE_STREAM_URL = os.environ.get("ORACLE_STREAM_URL", "").strip().rstrip("/")
+ORACLE_BANDWIDTH_LIMIT_GB = float(os.environ.get("ORACLE_BANDWIDTH_LIMIT_GB", "10000"))
+
+# Move new links to the next host once a host passes this % of its monthly limit.
+STREAM_SWITCH_PERCENT = int(os.environ.get("STREAM_SWITCH_PERCENT", "85"))
+STREAM_LINK_TTL_HOURS = int(os.environ.get("STREAM_LINK_TTL_HOURS", "6"))
+STREAM_DAILY_LIMIT = int(os.environ.get("STREAM_DAILY_LIMIT", "5"))
+STREAM_PREMIUM_DAILY_LIMIT = int(os.environ.get("STREAM_PREMIUM_DAILY_LIMIT", "20"))
+
+# Server tuning. Defaults are safe for a 512 MB free instance; raise on Oracle.
+STREAM_PREFETCH = int(os.environ.get("STREAM_PREFETCH", "4"))            # chunks in flight per download
+STREAM_MAX_CONNECTIONS = int(os.environ.get("STREAM_MAX_CONNECTIONS", "12"))
+STREAM_MAX_PER_LINK = int(os.environ.get("STREAM_MAX_PER_LINK", "8"))    # download managers use several
+
+# Bot-side feature flag: the button only appears when everything needed is set.
+FASTDL_ENABLED = bool(BIN_CHANNEL and STREAM_SECRET and (STREAM_BASE_URL or ORACLE_STREAM_URL))
+# Server-side flag: this process can serve /dl/ links.
+FASTDL_SERVER_ENABLED = bool(BIN_CHANNEL and STREAM_SECRET)
+
 # ── Fail fast on missing essentials instead of crashing deep in pyrogram ────
 _REQUIRED = {
     "API_ID": API_ID,
     "API_HASH": API_HASH,
-    "BOT_TOKEN": BOT_TOKEN,
     "DATABASE_URI": DATABASE_URI,
 }
+if not STREAM_ONLY:  # the Oracle stream server runs without the main bot token
+    _REQUIRED["BOT_TOKEN"] = BOT_TOKEN
 _missing = [k for k, v in _REQUIRED.items() if not v]
 if _missing:
     raise SystemExit(
