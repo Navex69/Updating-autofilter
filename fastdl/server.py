@@ -29,7 +29,7 @@ _EXPIRED_HTML = (
     "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
     "<body style='font-family:sans-serif;text-align:center;padding:3em'>"
     "<h3>⏳ This download link has expired</h3>"
-    "<p>Go back to the bot and tap <b>New Link</b> under the file.</p></body>"
+    "<p>Go back to the bot and request the file again to get a fresh link.</p></body>"
 )
 
 
