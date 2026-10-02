@@ -6,6 +6,7 @@ file straight from Telegram with resume support. Nothing is stored on the
 server. With the variables below unset, the bot behaves exactly as before.
 
 ## 1. Minimum setup (Koyeb / Render only)
+> No buttons until all three of BIN_CHANNEL, STREAM_SECRET and STREAM_BASE_URL are set (on Render: Dashboard → Environment).
 1. Create a **private channel** (BIN_CHANNEL) and make your bot an **admin**.
 2. Set on your deployment:
    - `BIN_CHANNEL` = the channel ID (e.g. `-100123...`)
@@ -61,4 +62,5 @@ Existing links keep working on the host that issued them.
 - Don't delete messages in BIN_CHANNEL — each file is copied there once and reused.
 - Render free instances sleep when idle; the first click after a sleep can be slow.
 - Free hosts may restrict heavy transfer; check Render/Koyeb terms.
-- Watch/streaming button is the next phase and isn't included here.
+- **▶️ Watch** appears next to Download for video files. It opens a player page; MKV/HEVC/AC3 often won't play in a browser, so the page also has **Open in VLC / MX Player** buttons that stream the same link.
+- On startup the log says `Fast Download is ON` or `Fast Download is OFF — Missing: ...`. If you see no buttons, check that line first.

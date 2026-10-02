@@ -254,3 +254,4 @@ FAST_LINK_READY_TXT = "✅ Link ready — tap Download. It works for {hours} hou
 FAST_LIMIT_REACHED_TXT = "⚠️ You've used all {limit} fast-download links for today. Try again tomorrow."
 FAST_UNAVAILABLE_TXT = "⚠️ Fast download is busy right now. Please use the file above."
 FAST_ERROR_TXT = "❌ Couldn't create the link. Please try again in a moment."
+FAST_WATCH_BTN = "▶️ Watch"

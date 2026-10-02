@@ -7,7 +7,8 @@ from pyrogram.errors import PeerIdInvalid
 
 from config import (
     API_ID, API_HASH, BOT_TOKEN, PORT, ADMINS,
-    BIN_CHANNEL, HELPER_BOT_TOKENS, FASTDL_SERVER_ENABLED,
+    BIN_CHANNEL, STREAM_SECRET, STREAM_BASE_URL, ORACLE_STREAM_URL,
+    HELPER_BOT_TOKENS, FASTDL_SERVER_ENABLED, FASTDL_ENABLED,
 )
 from database.filters_db import ensure_indexes
 from database.premium_db import ensure_indexes as ensure_premium_indexes
@@ -74,6 +75,14 @@ class Bot(Client):
                 await stream_pool.start(API_ID, API_HASH, [BOT_TOKEN] + HELPER_BOT_TOKENS, BIN_CHANNEL)
             except Exception:
                 logger.exception("Fast-download pool failed to start — bot continues without it")
+
+        if FASTDL_ENABLED:
+            logger.info("Fast Download is ON (hosts: %s)",
+                        ", ".join(n for n, v in (("oracle", ORACLE_STREAM_URL), ("local", STREAM_BASE_URL)) if v))
+        else:
+            missing = [n for n, v in (("BIN_CHANNEL", BIN_CHANNEL), ("STREAM_SECRET", STREAM_SECRET),
+                                      ("STREAM_BASE_URL (or ORACLE_STREAM_URL)", STREAM_BASE_URL or ORACLE_STREAM_URL)) if not v]
+            logger.info("Fast Download is OFF — no buttons shown. Missing: %s", ", ".join(missing))
 
         runner = web.AppRunner(web_app)
         await runner.setup()
