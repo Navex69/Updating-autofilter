@@ -93,7 +93,7 @@ MOVIE_UPDATE_NOTIFICATION = _bool("MOVIE_UPDATE_NOTIFICATION", True)  # Notifica
 movie_update_channel = os.environ.get("MOVIE_UPDATE_CHANNEL", "-1002333962739")
 MOVIE_UPDATE_CHANNEL = int(movie_update_channel) if movie_update_channel and _id_pattern.match(movie_update_channel) else None
 fetch_update_channels = os.environ.get("FETCH_MOVIE_UPDATE", "-1002028282135")  # Movie Update Fetch Channels (space-separated)
-FETCH_MOVIE_UPDATE = int(fetch_update_channels) if fetch_update_channels and _id_pattern.match(fetch_update_channels) else None
+FETCH_MOVIE_UPDATE = _int_list("FETCH_MOVIE_UPDATE", "-1002028282135")
 
 # ── Movie Update Display Settings ─────────────────────────────────────────
 LINK_PREVIEW = _bool("LINK_PREVIEW", False)  # Shows link preview instead of image
