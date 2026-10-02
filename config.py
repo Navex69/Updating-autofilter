@@ -37,13 +37,13 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 ADMINS = _int_list("ADMINS", "6541030917 1052054451")
 
 # ── Database ──────────────────────────────────────────────────────────────────
-DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://gd3251791_db_user:GDPQbmyXAEFDGpbL@cluster0.6jxsnxc.mongodb.net/?appName=Cluster0")
-DATABASE_NAME = os.environ.get("DATABASE_NAME", "AutofilterBot")
-COLLECTION_NAME = os.environ.get("COLLECTION_NAME", "files")
+DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://autofilter:filter@cluster0.iitbepl.mongodb.net/?appName=Cluster0")
+DATABASE_NAME = os.environ.get("DATABASE_NAME", "Cluster0")
+COLLECTION_NAME = os.environ.get("COLLECTION_NAME", "navex")
 
 # ── Source channels the bot indexes files from (space-separated IDs) ────────
 # The bot must be an admin/member of every channel listed here.
-CHANNELS = _int_list("CHANNELS", "-1002407564854")
+CHANNELS = _int_list("CHANNELS", "-1002066489726 -1002445793312 -1002407564854 -1002467109334 -1003941255241")
 
 # ── Search behaviour ──────────────────────────────────────────────────────────
 # Search works in groups always. Private-chat search can be switched off here
@@ -82,7 +82,7 @@ request_channel = os.environ.get("REQUEST_CHANNEL", "-1003073036876")
 REQUEST_CHANNEL = int(request_channel) if request_channel and _id_pattern.match(request_channel) else None
 
 # ── File not found channel for timeout notifications ───────────────────────
-not_found_channel = os.environ.get("NOT_FOUND_FILE_CHANNEL", "-1003073036876")
+not_found_channel = os.environ.get("NOT_FOUND_FILE_CHANNEL", "-1002279624678")
 NOT_FOUND_FILE_CHANNEL = int(not_found_channel) if not_found_channel and _id_pattern.match(not_found_channel) else None
 
 # ── Auto-request timeout settings ─────────────────────────────────────────
@@ -90,10 +90,10 @@ SUGGESTION_TIMEOUT = int(os.environ.get("SUGGESTION_TIMEOUT", "120"))  # seconds
 
 # ── Movie Update Notification Settings ───────────────────────────────────
 MOVIE_UPDATE_NOTIFICATION = _bool("MOVIE_UPDATE_NOTIFICATION", True)  # Notification On/Off
-movie_update_channel = os.environ.get("MOVIE_UPDATE_CHANNEL", "-1003073036876")
+movie_update_channel = os.environ.get("MOVIE_UPDATE_CHANNEL", "-1002333962739")
 MOVIE_UPDATE_CHANNEL = int(movie_update_channel) if movie_update_channel and _id_pattern.match(movie_update_channel) else None
-fetch_update_channels = os.environ.get("FETCH_MOVIE_UPDATE", "-1003073036876")  # Movie Update Fetch Channels (space-separated)
-FETCH_MOVIE_UPDATE = _int_list("FETCH_MOVIE_UPDATE", "-1003073036876")  # List of channel IDs for auto-fetch
+fetch_update_channels = os.environ.get("FETCH_MOVIE_UPDATE", "-1002028282135")  # Movie Update Fetch Channels (space-separated)
+FETCH_MOVIE_UPDATE = int(fetch_update_channels) if fetch_update_channels and _id_pattern.match(fetch_update_channels) else None
 
 # ── Movie Update Display Settings ─────────────────────────────────────────
 LINK_PREVIEW = _bool("LINK_PREVIEW", False)  # Shows link preview instead of image
@@ -108,13 +108,13 @@ PORT = int(os.environ.get("PORT", "8080"))
 # See FASTDL_SETUP.md. With BIN_CHANNEL / STREAM_SECRET / a host URL unset, the
 # bot behaves exactly as before: no button, no routes, no extra connections.
 STREAM_ONLY = _bool("STREAM_ONLY", False)  # True on the Oracle server (no bot, just streaming)
-bin_channel = os.environ.get("BIN_CHANNEL", "-1003073036876")
+bin_channel = os.environ.get("BIN_CHANNEL", "-1002262450769")
 BIN_CHANNEL = int(bin_channel) if bin_channel and _id_pattern.match(bin_channel) else None
 STREAM_SECRET = os.environ.get("STREAM_SECRET", "BQHBa2AAB2Gkf7fVzKe7laAj3-sVJdoVgs7kdqElm_ivE4bUGIML4SNioZOtM_oBIk-Gal_oszjfAT7QIumIVsCMXVuyD0Gh29p1204DwCQ03-H28cieNGmi7-q75p0LETReT3xm54yhXKu1lfcpwu5eNMs9YeI9uPD2yeplb1ma3HyEFnTgJLSGXSR6Ww2EcNvVvum25FElPQlQ___oEdfTMygfTOmILhxkk3ehTTg1a0TrbfdGooam7-1eggRmFHw4kOQbjWRIvvVegOwlt-PZEfHYBviqr0KQftEAjSJ2pS6kvVM5qioOyGbSK8iIKraNBRp6SWv9JZpkDxyRagtMhQbtaAAAAAHGKGRSAA").strip()   # must be identical on every host
 HELPER_BOT_TOKENS = os.environ.get("HELPER_BOT_TOKENS", "").split()  # extra bots = more speed
 
 # Public URL of THIS deployment (Koyeb/Render), e.g. https://my-bot.koyeb.app
-STREAM_BASE_URL = os.environ.get("STREAM_BASE_URL", "https://updating-autofilter.onrender.com").strip().rstrip("/")
+STREAM_BASE_URL = os.environ.get("STREAM_BASE_URL", "https://precious-mab-filetokensender-fdc78bed.koyeb.app/").strip().rstrip("/")
 STREAM_BANDWIDTH_LIMIT_GB = float(os.environ.get("STREAM_BANDWIDTH_LIMIT_GB", "100"))
 
 # Oracle Always-Free stream server — leave ORACLE_STREAM_URL empty to keep it disabled.
