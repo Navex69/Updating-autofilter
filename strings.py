@@ -216,6 +216,7 @@ MOVIE_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
 MANUAL_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
 
 <blockquote>🎭 ɢᴇɴʀᴇs     : <b>{genres}</b>
+📺 ᴏᴛᴛ          : <b>{ott}</b>
 🎞️ ǫᴜᴀʟɪᴛʏ  : <b>{quality}</b>
 📐 ʀᴇsᴏʟᴜᴛɪᴏɴ : <b>{resolution}</b>
 🎧 ᴀᴜᴅɪᴏ       : <b>{language}</b>
@@ -249,11 +250,9 @@ USER_VERIFIED_LOG_TXT = """#UserVerified
 # ── Fast Download ─────────────────────────────────────────────────────────────
 FAST_DOWNLOAD_BTN = "⚡ Fast Download"
 FAST_DOWNLOAD_LINK_BTN = "⬇️ Download"
-FAST_LINK_READY_TXT = (
-    "✅ Your link is ready!\n\n"
-    "⏳ Valid for {hours} hours, then it expires.\n"
-    "🔒 Personal link — please don't share it.\n\n"
-    "Tap Download or Watch below."
+FAST_GENERATING_TXT = (
+    "⏳ Generating your link...\n\n"
+    "✅ Valid for {hours} hours, then it expires.\n"
 )
 FAST_LIMIT_REACHED_TXT = "⚠️ You've used all {limit} fast-download links for today. Try again tomorrow."
 FAST_UNAVAILABLE_TXT = "⚠️ Fast download is busy right now. Please use the file above."
