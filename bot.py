@@ -24,32 +24,13 @@ logger = logging.getLogger(__name__)
 
 USER_COMMANDS = [
     BotCommand("start", "Start the bot"),
-    BotCommand("help", "How search works"),
+    BotCommand("trending", "Most searched titles"),
     BotCommand("myplan", "Check your premium status"),
     BotCommand("req", "Request a file"),
-    BotCommand("trending", "Most searched titles"),
-    BotCommand("filterwords", "Words ignored in searches"),
 ]
 ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand("admin", "Admin commands panel"),
     BotCommand("settings", "Admin settings panel"),
-    BotCommand("stats", "Full bot statistics"),
-    BotCommand("extra", "Extra admin commands"),
-    BotCommand("id", "User info"),
-    BotCommand("send", "Send a message to users"),
-    BotCommand("broadcast", "Broadcast to all users"),
-    BotCommand("ban", "Ban a user"),
-    BotCommand("unban", "Unban a user"),
-    BotCommand("showban", "List banned users"),
-    BotCommand("delete", "Delete a file"),
-    BotCommand("deleteall", "Delete all indexed files"),
-    BotCommand("checklimit", "Check a user's file limit"),
-    BotCommand("resetlimit", "Reset a user's file limit"),
-    BotCommand("resetlimitall", "Reset everyone's file limit"),
-    BotCommand("show_groups", "Groups where bot is admin"),
-    BotCommand("leave_groups", "Leave a group"),
-    BotCommand("set_filterword", "Add filter words"),
-    BotCommand("remove_filterword", "Remove filter words"),
 ]
 
 
