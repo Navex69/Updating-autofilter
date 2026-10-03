@@ -50,6 +50,8 @@ DEFAULTS = {
     "file_limit_enabled": False,
     "file_limit_count": 2,
     "movie_update_notification": True,
+    "autofilter_enabled": True,   # False -> search answers "under maintenance"
+    "filter_words": [],           # words/phrases silently dropped from every search query
 }
 
 _cache: dict | None = None
