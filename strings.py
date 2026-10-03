@@ -16,6 +16,8 @@ settings) — tap/open one and I'll send it to you here in PM.
 <b>Everyone</b>
 /myplan — check your premium status
 /req or /request — request a file if not found
+/trending — most searched titles right now
+/filterwords — words I ignore when searching
 
 <b>Admin commands</b>
 /index — index an entire channel (auto + manual)
@@ -82,8 +84,8 @@ VERIFY_PROMPT_TXT = (
     "📌 You need to complete verification (step {tier}/3) before I can send this file.\n"
     "Tap <b>Verify</b>, follow the page, then come back — I'll send the file automatically."
 )
-VERIFY_BTN = "🔐 Verify Now"
-VERIFY_TUTORIAL_BTN = "📖 How to Verify"
+VERIFY_BTN = "♻️ Verify"
+VERIFY_TUTORIAL_BTN = "❓ How to verify"
 VERIFY_DONE_TXT = "✅ Verification complete! Tap below to get your file."
 VERIFY_GET_FILE_BTN = "📥 Get my file"
 VERIFY_EXPIRED_TXT = "⚠️ This verification link has expired or was already used. Please request the file again."
@@ -196,11 +198,11 @@ REQUEST_AUTO_TIMEOUT_TXT = "⏳ No interaction — auto-sending request to admin
 ALREADY_AVAILABLE_TXT = "📌 Requested – <code>{requested_name}</code>\n\nYour request is already available 😋, just re-send movie name in group."
 NOT_RELEASED_TXT = "📌 Requested – <code>{requested_name}</code>\n\nSorry your request is not released yet 😢. Admin keep monitor your requests, wait for release and then send requested file name in group."
 NOT_AVAILABLE_TXT = "❌ Your requested movie is not available on the internet.\n\n📌 Requested – <code>{requested_name}</code>"
-UPLOADED_TXT = "📌 Requested – <code>{requested_name}</code>\n\nYour request is uploaded ☺️, just re-send movie name in group."
+UPLOADED_TXT = "Your request is uploaded ☺️, just re-send movie name in group"
 CHECK_SPELLING_TXT = "📌 Requested – <code>{requested_name}</code>\n\nAdmin can't find any movie and series of this name. Make sure, your spelling is correct ⚠️. Check spelling on google and then request again ❗"
 YEAR_LANGUAGE_TXT = "📌 Requested – <code>{requested_name}</code>\n\nBro please tell me years, language, bollywood or hollywood etc., then I will upload 😬. Just re-send request with more info."
-WRONG_SPELLING_TXT = "📌 Requested – <code>{requested_name}</code>\n\n✏️ Admin provided correct spelling: <code>{correct_spelling}</code>\n\nPlease request again with correct spelling."
-CUSTOM_REPLY_TXT = "📌 Requested – <code>{requested_name}</code>\n\n💬 Admin replied:\n{custom_message}"
+WRONG_SPELLING_TXT = "✏️ Admin provided correct spelling: <code>{correct_spelling}</code>\n\nPlease request again with correct spelling."
+CUSTOM_REPLY_TXT = "💬 Admin replied to your request:\n\n{custom_message}"
 
 # ── Movie Update Notification ───────────────────────────────────────────────
 MOVIE_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
@@ -216,52 +218,8 @@ MOVIE_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
 MANUAL_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
 
 <blockquote>🎭 ɢᴇɴʀᴇs     : <b>{genres}</b>
-📺 ᴏᴛᴛ          : <b>{ott}</b>
 🎞️ ǫᴜᴀʟɪᴛʏ  : <b>{quality}</b>
 📐 ʀᴇsᴏʟᴜᴛɪᴏɴ : <b>{resolution}</b>
 🎧 ᴀᴜᴅɪᴏ       : <b>{language}</b>
 🔥 ʀᴀᴛɪɴɢ      : <b>{rating} ⭐</b>
 {episodes}</blockquote>"""
-
-# ── restart notice (admin DM) and log-channel messages ──────────────────────
-RESTART_TXT = """🔄 <b>Bot Restarted</b>
-
-🤖 @{username} is back online.
-🕐 <b>Time:</b> {time}"""
-
-NEW_USER_LOG_TXT = """#NewUser
-👤 <b>New user started the bot</b>
-
-<b>Name:</b> {mention}
-<b>ID:</b> <code>{user_id}</code>
-<b>Username:</b> {username}
-<b>Total users:</b> {total}
-<b>Time:</b> {time}
-<b>Bot:</b> @{bot}"""
-
-USER_VERIFIED_LOG_TXT = """#UserVerified
-✅ <b>User verified</b> — {ordinal} verification ({tier}/3)
-
-<b>Name:</b> {mention}
-<b>ID:</b> <code>{user_id}</code>
-<b>Username:</b> {username}
-<b>Time:</b> {time}"""
-
-# ── Fast Download ─────────────────────────────────────────────────────────────
-FAST_DOWNLOAD_BTN = "⚡ Fast Download"
-FAST_DOWNLOAD_LINK_BTN = "⬇️ Download"
-FAST_GENERATING_TXT = (
-    "⏳ Generating your link...\n\n"
-    "✅ Valid for {hours} hours, then it expires.\n"
-)
-FAST_LIMIT_REACHED_TXT = "⚠️ You've used all {limit} fast-download links for today. Try again tomorrow."
-FAST_UNAVAILABLE_TXT = "⚠️ Fast download is busy right now. Please use the file above."
-FAST_ERROR_TXT = "❌ Couldn't create the link. Please try again in a moment."
-FAST_WATCH_BTN = "▶️ Watch"
-
-# Posted in BIN_CHANNEL (as a reply to the file) every time a link is generated.
-BIN_USER_INFO_TXT = """📥 <b>Fast download link generated</b>
-
-📁 <b>File:</b> <code>{file_name}</code>
-🆔 <b>User ID:</b> <code>{user_id}</code>
-👤 <b>User:</b> {user_link}"""
