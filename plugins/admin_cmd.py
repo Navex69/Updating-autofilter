@@ -39,11 +39,6 @@ ADMIN_PANEL_TXT = """<b>🔧 Admin Commands Panel</b>
 <b>• /unban</b> <code>user_id</code> - Unban a user
 <b>• /showban</b> - List banned users with reasons
 
-<b>🔤 Filter Words:</b>
-<b>• /set_filterword</b> <code>word, phrase, …</code> - Ignore these words in searches
-<b>• /remove_filterword</b> <code>word, phrase, …</code> - Stop ignoring them
-<b>• /filterwords</b> - Show all filter words
-
 <b>📊 File Limit:</b>
 <b>• /checklimit</b> <code>user_id</code> - Check a user's free file usage
 <b>• /resetlimit</b> <code>user_id</code> - Reset one user's limit
@@ -55,8 +50,6 @@ ADMIN_PANEL_TXT = """<b>🔧 Admin Commands Panel</b>
 <b>• /broadcast</b> - Reply to a message to send it to all users <i>(PM)</i>
 <b>• /syncusers</b> - Import old users into the broadcast list <i>(PM)</i>
 <b>• /extra</b> - Short list of the extra commands
-<b>• /trending</b> - Most searched titles (everyone can use it)
-<b>• Autofilter ON/OFF</b> - top button in /settings
 
 <b>🔗 Verification Setup:</b>
 <b>• /set_shortener</b> - Set verification shortener

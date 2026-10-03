@@ -125,13 +125,13 @@ async def show_options_callback(bot, query):
     userid = query.from_user.id
     
     buttons = [
-        [InlineKeyboardButton("Already Available", callback_data=f"already_available#{user_id}#{msg_id}"), 
-         InlineKeyboardButton("Not Released Yet", callback_data=f"not_released#{user_id}#{msg_id}")],
-        [InlineKeyboardButton("Tell Me Year/Language", callback_data=f"year#{user_id}#{msg_id}"), 
-         InlineKeyboardButton("Check Your Spelling", callback_data=f"upload_in#{user_id}#{msg_id}")],
-        [InlineKeyboardButton("Uploaded", callback_data=f"uploaded#{user_id}#{msg_id}"), 
-         InlineKeyboardButton("Not Available", callback_data=f"not_available#{user_id}#{msg_id}")],
-        [InlineKeyboardButton("Uploaded, Wrong Spelling", callback_data=f"spl_wrong#{user_id}#{msg_id}")],
+        [InlineKeyboardButton("🫤 Already Available", callback_data=f"already_available#{user_id}#{msg_id}"), 
+         InlineKeyboardButton("🚫 Not Released Yet", callback_data=f"not_released#{user_id}#{msg_id}")],
+        [InlineKeyboardButton("📅 Tell Me Year/Language", callback_data=f"year#{user_id}#{msg_id}"), 
+         InlineKeyboardButton("✏️ Check Your Spelling", callback_data=f"upload_in#{user_id}#{msg_id}")],
+        [InlineKeyboardButton("✅ Uploaded", callback_data=f"uploaded#{user_id}#{msg_id}"), 
+         InlineKeyboardButton("❌ Not Available", callback_data=f"not_available#{user_id}#{msg_id}")],
+        [InlineKeyboardButton("📝 Uploaded, Wrong Spelling", callback_data=f"spl_wrong#{user_id}#{msg_id}")],
         [InlineKeyboardButton("💬 Custom Reply", callback_data=f"custom_reply#{user_id}#{msg_id}")]
     ]
     
@@ -568,8 +568,8 @@ async def handle_custom_reply_input(bot, message):
             return
 
 
-@Client.on_message(filters.command("req"))
-@Client.on_message(filters.command("request"))
+@Client.on_message(filters.command("req") & filters.private)
+@Client.on_message(filters.command("request") & filters.private)
 async def manual_request_cmd(bot, message):
     """
     Manual request command - /req or /request <file_name>

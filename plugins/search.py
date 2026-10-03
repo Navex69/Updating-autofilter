@@ -140,7 +140,7 @@ def _suggestion_cache_get(key: str) -> list | None:
 def _suggestion_keyboard(key: str, titles: list) -> InlineKeyboardMarkup:
     rows = []
     for i, title in enumerate(titles):
-        label = title if len(title) <= 60 else title[:57] + "…"
+        label = "🎬 " + (title if len(title) <= 55 else title[:52] + "…")
         rows.append([InlineKeyboardButton(label, callback_data=f"sug#{key}#{i}")])
     return InlineKeyboardMarkup(rows)
 
@@ -253,7 +253,7 @@ def _nav_row(key: str, offset: int, total: int) -> list:
     current_page = offset // RESULTS_PER_PAGE + 1
     nav = [InlineKeyboardButton("⬅️", callback_data=f"pg#{key}#{max(0, offset - RESULTS_PER_PAGE)}")] \
         if offset > 0 else []
-    nav.append(InlineKeyboardButton(f"{current_page}/{total_pages}", callback_data="noop"))
+    nav.append(InlineKeyboardButton(f"📄 {current_page}/{total_pages}", callback_data="noop"))
     if offset + RESULTS_PER_PAGE < total:
         nav.append(InlineKeyboardButton("➡️", callback_data=f"pg#{key}#{offset + RESULTS_PER_PAGE}"))
     return nav
@@ -297,6 +297,7 @@ def _render(key: str, entry: dict, offset: int):
         text = header
         for doc in page:
             label = f"{_strip_tags(display_name(doc))} • {human_size(doc.get('file_size', 0))}"
+            label = "📁 " + label
             if len(label) > 60:
                 label = label[:57] + "…"
             rows.append([InlineKeyboardButton(
@@ -354,6 +355,13 @@ async def _expired(message):
 
 def _search_filter(_, __, message):
     if not message.text or message.text.startswith("/"):
+        return False
+    # The bot's own messages (restart notice, "Searching..." status, results)
+    # come back to it as updates — they must never be treated as a query, or
+    # every reply the bot sends triggers another search. Only real users and
+    # admins can search.
+    sender = message.from_user
+    if message.outgoing or (sender and (sender.is_self or sender.is_bot)):
         return False
     if message.chat.type == enums.ChatType.PRIVATE:
         return ENABLE_PM_SEARCH
@@ -422,18 +430,6 @@ async def handle_search(bot, message):
     if not query:
         return
 
-    # Extra features hook: drops admin-set filter words from the query.
-    # Imported lazily (plugins import each other) and optional — if the plugin
-    # is missing the search simply runs on the raw text as before.
-    try:
-        from plugins.extra_features import prepare_query, record_trending
-    except Exception:
-        prepare_query = record_trending = None
-    if prepare_query:
-        query = await prepare_query(message, query)
-        if not query:
-            return
-
     # The "Searching..." status message is sent concurrently with the real
     # Stage 1 work below, not before it — so showing search progress never
     # adds latency to the common case where Stage 1 already finds it.
@@ -448,8 +444,6 @@ async def handle_search(bot, message):
 
     if results:
         # Stage 1 already found it — the common, fast path.
-        if record_trending:
-            asyncio.create_task(record_trending(message.from_user.id if message.from_user else 0, results))
         await _deliver_results(message, query, results, poster=poster)
         asyncio.create_task(_schedule_delete(status, 0))
         return
@@ -463,8 +457,6 @@ async def handle_search(bot, message):
     hit = await fuzzy_correct(query)
     if hit:
         resolved_query, results = hit
-        if record_trending:
-            asyncio.create_task(record_trending(message.from_user.id if message.from_user else 0, results))
         # The original query's poster lookup was based on a misspelled
         # title and likely came back empty — retry with the corrected one.
         poster = poster or await fetch_poster(resolved_query)
