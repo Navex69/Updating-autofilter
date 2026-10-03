@@ -1,4 +1,4 @@
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 
 from database.premium_db import get_premium
 from log_utils import register_user
@@ -11,8 +11,14 @@ from strings import (
 )
 
 
-@Client.on_message(filters.command("start") & filters.private)
+@Client.on_message(filters.command("start"))
 async def start_cmd(bot, message):
+    if message.chat.type != enums.ChatType.PRIVATE:
+        # In a group: just the welcome text (file / verify deep links only run in DM).
+        mention = message.from_user.mention if message.from_user else "there"
+        await message.reply_text(START_TXT.format(mention=mention))
+        return
+
     await register_user(message.from_user)
 
     args = message.text.split(maxsplit=1)
@@ -51,6 +57,8 @@ async def help_cmd(_, message):
 
 @Client.on_message(filters.command("myplan"))
 async def myplan_cmd(_, message):
+    if not message.from_user:  # anonymous group admin
+        return
     doc = await get_premium(message.from_user.id)
     if doc:
         expiry = doc["expiry_time"].astimezone(IST).strftime("%d %b %Y, %I:%M %p IST")

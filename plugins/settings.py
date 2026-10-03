@@ -21,7 +21,7 @@ from plugins.force_sub import is_bot_admin_in
 from shortlink import make_short_link
 from utils import mask_secret, IST
 from strings import (
-    SETTINGS_MAIN_TXT,
+    SETTINGS_MAIN_TXT, AUTOFILTER_INFO_TXT,
     FSUB_MENU_HEADER, FSUB_MENU_EMPTY, FSUB_ADD_PROMPT, FSUB_ADD_NOT_CHANNEL,
     FSUB_ADD_NOT_ADMIN, FSUB_ADD_OK, FSUB_ADD_FAILED, FSUB_REMOVED_TXT,
     PREMIUM_MENU_EMPTY, PREMIUM_MENU_ROW,
@@ -60,6 +60,8 @@ def _status(flag: bool) -> str:
 
 def build_main_menu(settings: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton(_status(settings["autofilter_enabled"]), callback_data="cfg#tg#autofilter"),
+         InlineKeyboardButton("🤖 Autofilter", callback_data="cfg#info#autofilter")],
         [InlineKeyboardButton("📚 Index", callback_data="cfg#m#index"),
          InlineKeyboardButton("➕ Add Channel", callback_data="cfg#idx_add")],
         [InlineKeyboardButton(_status(settings["force_sub_enabled"]), callback_data="cfg#tg#fsub"),
@@ -294,6 +296,7 @@ async def settings_callback(bot, query):
             "file_ad": "file_autodelete_enabled",
             "filelimit": "file_limit_enabled",
             "movieupd": "movie_update_notification",
+            "autofilter": "autofilter_enabled",
         }.get(parts[2])
         if field:
             settings = await get_settings()
@@ -307,6 +310,9 @@ async def settings_callback(bot, query):
         return
 
     if action == "info":
+        if parts[2] == "autofilter":
+            await query.answer(AUTOFILTER_INFO_TXT, show_alert=True)
+            return
         await query.answer(
             "Choose whether search results show as tappable buttons or a plain text list.",
             show_alert=True,

@@ -568,8 +568,8 @@ async def handle_custom_reply_input(bot, message):
             return
 
 
-@Client.on_message(filters.command("req") & filters.private)
-@Client.on_message(filters.command("request") & filters.private)
+@Client.on_message(filters.command("req"))
+@Client.on_message(filters.command("request"))
 async def manual_request_cmd(bot, message):
     """
     Manual request command - /req or /request <file_name>
@@ -579,6 +579,9 @@ async def manual_request_cmd(bot, message):
         await message.reply_text(REQUEST_NOT_CONFIGURED_TXT)
         return
     
+    if not message.from_user:  # anonymous group admin
+        return
+
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.reply_text(

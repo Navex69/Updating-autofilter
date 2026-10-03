@@ -56,6 +56,12 @@ ADMIN_PANEL_TXT = """<b>🔧 Admin Commands Panel</b>
 <b>• /set_verify_time</b> - Set verification time gaps
 <b>• /set_tutorial</b> - Set verification tutorial links
 
+<b>🚫 Search Filters:</b>
+<b>• /set_filterword</b> <code>word, phrase</code> - Words ignored in every search
+<b>• /remove_filterword</b> <code>word, phrase</code> - Remove ignored words
+<b>• /filterwords</b> - Show all filter words
+<b>• /trending</b> - Most searched titles
+
 <b>ℹ️ Note:</b> Auto movie updates, fetch channels and requests are managed through the settings panel."""
 
 

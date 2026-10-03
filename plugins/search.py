@@ -14,6 +14,9 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE, REQUEST_CHANNEL, ADMINS, SUGGESTION_TIMEOUT, NOT_FOUND_FILE_CHANNEL
 from database.filters_db import search_files, display_name, extract_meta, apply_filters
 from database.settings_db import get_settings
+from database.trending_db import record_search, title_of
+from filterwords import apply_filter_words
+from linkcheck import has_link
 from poster import fetch_poster
 from spellcheck import fuzzy_correct, suggest_titles
 from utils import temp, human_size
@@ -24,6 +27,7 @@ from strings import (
     STATUS_STAGE1_TXT, STATUS_STAGE2_TXT, STATUS_STAGE3_TXT,
     SUGGESTIONS_HEADER_TXT, SUGGESTION_NOT_FOUND_TXT,
     REQUEST_BTN_TXT, REQUEST_NOT_CONFIGURED_TXT, REQUEST_SENT_TXT,
+    MAINTENANCE_TXT, EMPTY_QUERY_TXT,
 )
 
 logger = logging.getLogger(__name__)
@@ -356,6 +360,8 @@ async def _expired(message):
 def _search_filter(_, __, message):
     if not message.text or message.text.startswith("/"):
         return False
+    if has_link(message):  # links are never a search query
+        return False
     # The bot's own messages (restart notice, "Searching..." status, results)
     # come back to it as updates — they must never be treated as a query, or
     # every reply the bot sends triggers another search. Only real users and
@@ -430,6 +436,18 @@ async def handle_search(bot, message):
     if not query:
         return
 
+    settings = await get_settings()
+    if not settings["autofilter_enabled"]:
+        await message.reply_text(MAINTENANCE_TXT, quote=True)
+        return
+
+    # Admin-defined filter words are dropped from the query before searching.
+    if settings["filter_words"]:
+        query = apply_filter_words(query, settings["filter_words"])
+        if not query:
+            await message.reply_text(EMPTY_QUERY_TXT, quote=True)
+            return
+
     # The "Searching..." status message is sent concurrently with the real
     # Stage 1 work below, not before it — so showing search progress never
     # adds latency to the common case where Stage 1 already finds it.
@@ -445,6 +463,7 @@ async def handle_search(bot, message):
     if results:
         # Stage 1 already found it — the common, fast path.
         await _deliver_results(message, query, results, poster=poster)
+        asyncio.create_task(record_search(title_of(results, query)))
         asyncio.create_task(_schedule_delete(status, 0))
         return
 
@@ -461,6 +480,7 @@ async def handle_search(bot, message):
         # title and likely came back empty — retry with the corrected one.
         poster = poster or await fetch_poster(resolved_query)
         await _deliver_results(message, resolved_query, results, original_query=query, poster=poster)
+        asyncio.create_task(record_search(title_of(results, resolved_query)))
         asyncio.create_task(_schedule_delete(status, 0))
         return
 
