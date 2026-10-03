@@ -58,6 +58,8 @@ RULES = [
     ("cb",   r"^cfg#ask#", PRIMARY),
     ("cb",   r"^cfg#(close|(fsub|idx|mu)_rm)|^idx#(cancel|stop)|^cancel_", DANGER),
     ("cb",   r"^cfg#(idx_add|fsub_add|mu_add)|^idx#go", SUCCESS),
+    # /trending: green title buttons (blue Back / Next fall through to the default)
+    ("cb",   r"^trq#", SUCCESS),
     # admin replies to requests (colour by the action name)
     ("cb",   r"^(uploaded|not_available|not_released)#", None),
     # file / verify / request actions

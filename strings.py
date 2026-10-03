@@ -5,6 +5,8 @@ and members can just type a movie/show name to search.
 
 <b>Commands:</b>
 /help — how search works
+/trending — most searched titles
+/filterwords — words ignored in searches
 /myplan — check your premium status
 """
 
@@ -16,6 +18,8 @@ settings) — tap/open one and I'll send it to you here in PM.
 <b>Everyone</b>
 /myplan — check your premium status
 /req or /request — request a file if not found
+/trending — most searched titles
+/filterwords — words ignored in searches
 
 <b>Admin commands</b>
 /index — index an entire channel (auto + manual)
@@ -23,6 +27,7 @@ settings) — tap/open one and I'll send it to you here in PM.
 /settings — force-sub, premium, verification, result display
 /add_premium, /remove_premium — manage premium users
 /set_shortener, /set_verify_time, /set_tutorial — verification setup
+/set_filterword, /remove_filterword — manage ignored search words
 """
 
 NOT_FOUND_TXT = "❌ No results found for <b>{query}</b>."
@@ -265,3 +270,41 @@ BIN_USER_INFO_TXT = """📥 <b>Fast download link generated</b>
 📁 <b>File:</b> <code>{file_name}</code>
 🆔 <b>User ID:</b> <code>{user_id}</code>
 👤 <b>User:</b> {user_link}"""
+
+
+# ── Link guard ───────────────────────────────────────────────────────────────
+LINK_NOT_ALLOWED_TXT = "🚫 {mention}, sending link is not allowed."
+
+# ── Autofilter on/off ────────────────────────────────────────────────────────
+MAINTENANCE_TXT = "🛠 <b>Bot is under maintenance.</b>\n\nPlease try again later."
+AUTOFILTER_INFO_TXT = "Turn the autofilter ON or OFF. While it is OFF the bot doesn't search and replies that it is under maintenance."
+EMPTY_QUERY_TXT = "❌ Please send a movie / series name to search."
+
+# ── Filter words ─────────────────────────────────────────────────────────────
+FILTERWORDS_LIST_TXT = "🚫 <b>Filter words</b> ({count})\n\nThese words are ignored in every search:\n\n{words}"
+FILTERWORDS_EMPTY_TXT = "ℹ️ No filter words are set."
+SET_FILTERWORD_USAGE = (
+    "Usage: <code>/set_filterword word1, word2, some phrase</code>\n\n"
+    "Separate multiple words / phrases with a comma. They are removed from every search query."
+)
+SET_FILTERWORD_OK = (
+    "✅ <b>Filter words updated</b>\n\n"
+    "➕ Added: {added}\n"
+    "↔️ Already set: {existing}\n\n"
+    "Total: <b>{total}</b>"
+)
+REMOVE_FILTERWORD_USAGE = (
+    "Usage: <code>/remove_filterword word1, some phrase</code>\n\n"
+    "Separate multiple words / phrases with a comma. See all with /filterwords."
+)
+REMOVE_FILTERWORD_OK = (
+    "✅ <b>Filter words updated</b>\n\n"
+    "🗑 Removed: {removed}\n"
+    "❓ Not found: {missing}\n\n"
+    "Total: <b>{total}</b>"
+)
+
+# ── /trending ────────────────────────────────────────────────────────────────
+TRENDING_HEADER_TXT = "🔥 <b>Trending Searches</b>\n\nMost searched titles — tap one to get its files:"
+TRENDING_EMPTY_TXT = "🔥 No trending searches yet. Search for something first!"
+TRENDING_NOT_IN_DB_TXT = "❌ {title} isn't in the database anymore."

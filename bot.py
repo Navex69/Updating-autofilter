@@ -36,10 +36,14 @@ USER_COMMANDS = [
     BotCommand("help", "How search works"),
     BotCommand("myplan", "Check your premium status"),
     BotCommand("req", "Request a file"),
+    BotCommand("trending", "Most searched titles"),
+    BotCommand("filterwords", "Words ignored in searches"),
 ]
 ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand("admin", "Admin commands panel"),
     BotCommand("settings", "Admin settings panel"),
+    BotCommand("set_filterword", "Add words ignored in searches"),
+    BotCommand("remove_filterword", "Remove ignored search words"),
 ]
 
 
