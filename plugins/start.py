@@ -1,7 +1,6 @@
 from pyrogram import Client, filters
 
 from database.premium_db import get_premium
-from log_utils import register_user
 from plugins.deliver import deliver_file
 from plugins.verify import handle_notcopy
 from utils import IST, temp
@@ -11,10 +10,8 @@ from strings import (
 )
 
 
-@Client.on_message(filters.command("start") & filters.private)
+@Client.on_message(filters.command("start"))
 async def start_cmd(bot, message):
-    await register_user(message.from_user)
-
     args = message.text.split(maxsplit=1)
     payload = args[1] if len(args) > 1 else ""
 

@@ -9,6 +9,11 @@ Extra admin features — drop-in plugin (auto-loaded, no other file needs editin
   6. /show_groups /leave_groups   manage groups the bot is admin in
   7. /broadcast    any media type, optional pin, live progress, cancel + undo
   8. /stats        full dashboard (channels, users, groups, DB storage, server)
+  9. Link guard    non-admins can't post links (deleted + warning, never searched)
+ 10. Autofilter ON/OFF (set in /settings) + /filterwords /set_filterword /remove_filterword
+ 11. /trending    most searched titles (correct spellings, 10 per page)
+
+plugins/search.py calls prepare_query() and record_trending() from this file.
 
 Helper commands:  /extra (command list)   /syncusers (import old users)
 
@@ -16,13 +21,15 @@ New MongoDB collections (this file creates them itself):
   bot_users, bot_groups, banned_users
 """
 import asyncio
+import functools
+import hashlib
 import html
 import logging
 import os
 import re
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from pymongo import UpdateOne
 from pyrogram import Client, filters, enums
@@ -34,10 +41,10 @@ from pyrogram.types import InlineKeyboardMarkup as Markup, InlineKeyboardButton 
 
 from config import ADMINS, ENABLE_PM_SEARCH
 from database.client import db
-from database.filters_db import files, get_file_by_id, display_name, count_by_channel
+from database.filters_db import files, get_file_by_id, display_name, count_by_channel, clean_title, search_files
 from database.premium_db import premium_col
 from database.limit_db import limit_col
-from database.settings_db import get_settings
+from database.settings_db import get_settings, update_settings
 from utils import IST, Throttle, readable_time
 
 logger = logging.getLogger(__name__)
@@ -1379,9 +1386,12 @@ async def build_stats(bot) -> str:
 
     other = max(total_files_n - in_channels, 0)
     pm = "✅" if ENABLE_PM_SEARCH else "❌"
+    af_on = settings.get("autofilter_enabled", True)
+    af_line = ("🟢 ON" if af_on else "🔴 OFF <i>(maintenance mode)</i>") + f"  <i>(Groups ✅ · PM {pm})</i>"
     lines = [
         "📊 <b>Bot Statistics</b>\n",
-        f"🔎 <b>Autofilter:</b> 🟢 ON  <i>(Groups ✅ · PM {pm})</i>",
+        f"🔎 <b>Autofilter:</b> {af_line}",
+        f"🔤 <b>Filter words:</b> <code>{len(settings.get('filter_words') or [])}</code>",
         f"📥 <b>Auto-indexing:</b> <code>{len(settings['index_channels'])}</code> channel(s)\n",
         "📚 <b>Index channels</b>",
         *(chan_lines or ["  <i>No index channels set</i>"]),
@@ -1420,6 +1430,426 @@ async def stats_callbacks(bot, query):
         return
     await query.answer("Refreshing…")
     await _safe_edit(query.message, await build_stats(bot), _stats_markup())
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 9. LINK GUARD — non-admins can't post links (group or PM). The link message is
+#    deleted, a warning is shown, and the text never reaches the search handler.
+#    Bot admins and group admins are exempt. Runs before search (group -1).
+#    Needs the bot to have "Delete messages" permission in the group.
+# ══════════════════════════════════════════════════════════════════════════════
+
+LINK_WARN_TXT = "🚫 <b>Sending links is not allowed!</b>"          # PM
+LINK_WARN_GROUP_TXT = "🚫 {who}, <b>sending links is not allowed!</b>"   # group
+_LINK_RE = re.compile(r"(?i)(?:https?://|ftp://|tg://|www\.|(?:t|telegram)\.(?:me|dog)/)")
+_LINK_ENTITIES = (enums.MessageEntityType.URL, enums.MessageEntityType.TEXT_LINK)
+_gadmin_cache: dict = {}
+_link_warned: dict = {}
+
+
+def has_link(message) -> bool:
+    text = message.text or message.caption or ""
+    entities = message.entities or message.caption_entities or []
+    if any(e.type in _LINK_ENTITIES for e in entities):
+        return True
+    return bool(_LINK_RE.search(text))
+
+
+def _is_group_chat(chat) -> bool:
+    return chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP)
+
+
+async def _is_group_admin(bot, chat_id: int, uid: int) -> bool:
+    hit = _gadmin_cache.get((chat_id, uid))
+    if hit and time.time() - hit[0] < 300:
+        return hit[1]
+    try:
+        member = await bot.get_chat_member(chat_id, uid)
+        ok = member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER)
+    except RPCError:
+        ok = False
+    if len(_gadmin_cache) > 3000:
+        _gadmin_cache.clear()
+    _gadmin_cache[(chat_id, uid)] = (time.time(), ok)
+    return ok
+
+
+async def _link_violation(_, bot, message):
+    u = message.from_user
+    if not u or u.is_bot or u.id in ADMINS:
+        return False
+    if not has_link(message):
+        return False
+    if _is_group_chat(message.chat) and await _is_group_admin(bot, message.chat.id, u.id):
+        return False
+    return True
+
+
+link_violation_filter = filters.create(_link_violation)
+
+
+async def _delete_later(msg, seconds: int):
+    await asyncio.sleep(seconds)
+    try:
+        await msg.delete()
+    except RPCError:
+        pass
+
+
+async def _handle_link(bot, message):
+    try:
+        await message.delete()
+    except RPCError:
+        logger.info("Couldn't delete a link in %s — does the bot have 'Delete messages' permission?", message.chat.id)
+    u = message.from_user
+    in_group = _is_group_chat(message.chat)
+    key = (message.chat.id, u.id)
+    if in_group and time.time() - _link_warned.get(key, 0) < 10:
+        return                                   # one warning per 10s per user, no spam
+    _link_warned[key] = time.time()
+    if len(_link_warned) > 3000:
+        _link_warned.clear()
+    text = LINK_WARN_GROUP_TXT.format(who=user_link(u.id, _name_of(u))) if in_group else LINK_WARN_TXT
+    try:
+        warn = await bot.send_message(message.chat.id, text, disable_web_page_preview=True)
+        if in_group:
+            asyncio.create_task(_delete_later(warn, 15))
+    except RPCError:
+        pass
+
+
+@Client.on_message(link_violation_filter & (filters.private | filters.group), group=-1)
+async def link_guard(bot, message):
+    await _handle_link(bot, message)
+    message.stop_propagation()
+
+
+@Client.on_edited_message(link_violation_filter & (filters.private | filters.group), group=-1)
+async def link_guard_edited(bot, message):
+    await _handle_link(bot, message)       # someone edited a link into an old message
+    message.stop_propagation()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 10. AUTOFILTER ON/OFF + FILTER WORDS — both are applied by prepare_query(),
+#     which plugins/search.py calls at the top of its search handler.
+#     (Done there, not as an earlier handler, so admin replies that other
+#     plugins wait for with bot.listen() are never swallowed by maintenance.)
+# ══════════════════════════════════════════════════════════════════════════════
+
+MAINTENANCE_TXT = "🛠 <b>Bot is under maintenance.</b>\n\nPlease try again later."
+_maint_notified: dict = {}
+
+
+async def _maintenance_notice(message):
+    u = message.from_user
+    key = (message.chat.id, u.id if u else 0)
+    if time.time() - _maint_notified.get(key, 0) < 20:
+        return                                   # already told them a moment ago
+    _maint_notified[key] = time.time()
+    if len(_maint_notified) > 3000:
+        _maint_notified.clear()
+    try:
+        notice = await message.reply_text(MAINTENANCE_TXT, quote=True)
+        if _is_group_chat(message.chat):
+            asyncio.create_task(_delete_later(notice, 15))
+    except RPCError:
+        pass
+
+
+@functools.lru_cache(maxsize=4)
+def _fw_pattern(words: tuple):
+    parts = [r"\s+".join(re.escape(p) for p in w.split()) for w in sorted(words, key=len, reverse=True)]
+    if not parts:
+        return None
+    return re.compile(r"(?<!\w)(?:" + "|".join(parts) + r")(?!\w)", re.IGNORECASE)
+
+
+def strip_filter_words(text: str, words) -> str:
+    pat = _fw_pattern(tuple(words))
+    if not pat:
+        return text
+    out = pat.sub(" ", text)
+    return re.sub(r"\s{2,}", " ", out).strip(" ,;:|/-")
+
+
+async def prepare_query(message, query: str) -> str:
+    """Called by the search handler. Returns the query to search, or "" to stop
+    (maintenance mode on, or the message contained nothing but filter words)."""
+    settings = await get_settings()
+    if not settings.get("autofilter_enabled", True):
+        await _maintenance_notice(message)
+        return ""
+    words = settings.get("filter_words") or []
+    if not words:
+        return query
+    cleaned = strip_filter_words(query, words)
+    if cleaned:
+        return cleaned
+    if message.chat.type == enums.ChatType.PRIVATE:
+        await message.reply_text("🔎 Please type the name of the title you're looking for.", quote=True)
+    return ""
+
+
+def _parse_words(message) -> list:
+    parts = message.text.split(None, 1)
+    raw = parts[1] if len(parts) > 1 else ""
+    words = []
+    for chunk in raw.replace("\n", ",").split(","):
+        w = re.sub(r"\s+", " ", chunk).strip().lower()
+        if w and w not in words:
+            words.append(w)
+    return words
+
+
+def _code_list(words) -> str:
+    return " • ".join(f"<code>{esc(w)}</code>" for w in words)
+
+
+@Client.on_message(filters.command("set_filterword") & ADMIN)
+async def set_filterword_cmd(_, message):
+    new = _parse_words(message)
+    if not new:
+        await message.reply_text(
+            "<b>Usage:</b> <code>/set_filterword word, another word, a phrase</code>\n\n"
+            "Separate words or phrases with commas. They'll be ignored in every search — "
+            "e.g. with <code>movies</code> set, <i>punjabi movies</i> searches just <i>punjabi</i>."
+        )
+        return
+    too_short = [w for w in new if len(w) < 2]
+    too_long = [w for w in new if len(w) > 60]
+    new = [w for w in new if 2 <= len(w) <= 60][:50]
+    settings = await get_settings()
+    current = list(settings.get("filter_words") or [])
+    added = [w for w in new if w not in current]
+    existed = [w for w in new if w in current]
+    if added:
+        await update_settings({"filter_words": current + added})
+    lines = []
+    if added:
+        lines.append(f"✅ <b>Added {len(added)}:</b>\n{_code_list(added)}")
+    if existed:
+        lines.append(f"⏭ <b>Already set:</b>\n{_code_list(existed)}")
+    if too_short or too_long:
+        lines.append("⚠️ <b>Skipped</b> (must be 2–60 characters):\n" + _code_list(too_short + too_long))
+    lines.append(f"\n🔤 Total filter words: <code>{len(current) + len(added)}</code>")
+    await message.reply_text("\n\n".join(lines))
+
+
+@Client.on_message(filters.command("remove_filterword") & ADMIN)
+async def remove_filterword_cmd(_, message):
+    targets = _parse_words(message)
+    settings = await get_settings()
+    current = list(settings.get("filter_words") or [])
+    if not targets:
+        text = "<b>Usage:</b> <code>/remove_filterword word, another word, a phrase</code>"
+        if current:
+            text += "\n\n<b>Current filter words:</b>\n" + _code_list(current[:100])
+        await message.reply_text(text)
+        return
+    removed = [w for w in targets if w in current]
+    missing = [w for w in targets if w not in current]
+    if removed:
+        await update_settings({"filter_words": [w for w in current if w not in removed]})
+    lines = []
+    if removed:
+        lines.append(f"🗑 <b>Removed {len(removed)}:</b>\n{_code_list(removed)}")
+    if missing:
+        lines.append(f"❓ <b>Not found:</b>\n{_code_list(missing)}")
+    lines.append(f"\n🔤 Total filter words: <code>{len(current) - len(removed)}</code>")
+    await message.reply_text("\n\n".join(lines))
+
+
+@Client.on_message(filters.command("filterwords"))
+async def filterwords_cmd(_, message):
+    settings = await get_settings()
+    words = list(settings.get("filter_words") or [])
+    is_admin = bool(message.from_user and message.from_user.id in ADMINS)
+    if not words:
+        text = "ℹ️ <b>No filter words are set.</b>"
+        if is_admin:
+            text += "\n\nAdd some with <code>/set_filterword word, phrase</code>"
+        await message.reply_text(text)
+        return
+    shown, size = [], 0
+    for w in words:
+        size += len(w) + 22
+        if size > 3300:
+            break
+        shown.append(w)
+    text = (
+        f"🔤 <b>Filter words</b> — <code>{len(words)}</code>\n\n"
+        f"These words are ignored when you search:\n\n{_code_list(shown)}"
+    )
+    if len(shown) < len(words):
+        text += f"\n\n… and {len(words) - len(shown)} more"
+    if is_admin:
+        text += "\n\n<i>/set_filterword · /remove_filterword</i>"
+    await message.reply_text(text, quote=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 11. TRENDING — most searched titles of the last 7 days.
+#     Only searches that returned results are counted (direct hits and fuzzy
+#     corrections — not "did you mean" suggestions), and they're stored under the
+#     correctly spelled title taken from the matched file, so "avtar" and
+#     "avatar" both count toward "Avatar". One user counts once per title per 10 min.
+#     Storage is tiny: one row per title per day, auto-deleted after 14 days.
+# ══════════════════════════════════════════════════════════════════════════════
+
+trend_col = db["trending_stats"]
+_TREND_DAYS = 7
+_TREND_PAGE = 10
+_TREND_MAX = 100
+_TREND_DOTS = ["🔴", "🟠", "🟡", "🟢", "🔵", "🟣"]   # button "colour" (Telegram's real coloured buttons aren't supported by pyrofork)
+_trend_seen: dict = {}
+_trend_cache: dict = {"ts": 0.0, "items": []}
+_trend_index_ready = False
+
+
+def _canonical_title(results: list) -> str | None:
+    title = clean_title(display_name(results[0]))
+    if len(title) < 2:
+        return None
+    if title.isupper() or title.islower():
+        title = title.title()
+    return title
+
+
+def _hash(key: str) -> str:
+    return hashlib.md5(key.encode()).hexdigest()[:12]
+
+
+async def record_trending(user_id: int, results: list):
+    """Called by plugins/search.py after a search that found files."""
+    try:
+        global _trend_index_ready
+        if not results:
+            return
+        title = _canonical_title(results)
+        if not title:
+            return
+        key = title.lower()
+        now = time.time()
+        if now - _trend_seen.get((user_id, key), 0) < 600:
+            return
+        _trend_seen[(user_id, key)] = now
+        if len(_trend_seen) > 5000:
+            for k in [k for k, t in _trend_seen.items() if now - t > 600]:
+                _trend_seen.pop(k, None)
+        if not _trend_index_ready:
+            await trend_col.create_index("ts", expireAfterSeconds=14 * 86400)
+            _trend_index_ready = True
+        day = _now().astimezone(IST).strftime("%Y%m%d")
+        h = _hash(key)
+        await trend_col.update_one(
+            {"_id": f"{day}|{h}"},
+            {"$inc": {"count": 1}, "$set": {"title": title, "key": key, "h": h, "day": day, "ts": _now()}},
+            upsert=True,
+        )
+    except Exception:
+        logger.debug("record_trending failed", exc_info=True)
+
+
+async def top_trending(force: bool = False) -> list:
+    if not force and time.time() - _trend_cache["ts"] < 60:
+        return _trend_cache["items"]
+    cutoff = (_now().astimezone(IST) - timedelta(days=_TREND_DAYS - 1)).strftime("%Y%m%d")
+    pipeline = [
+        {"$match": {"day": {"$gte": cutoff}}},
+        {"$sort": {"day": 1}},
+        {"$group": {"_id": "$h", "title": {"$last": "$title"}, "count": {"$sum": "$count"}, "last": {"$max": "$ts"}}},
+        {"$sort": {"count": -1, "last": -1}},
+        {"$limit": _TREND_MAX},
+    ]
+    items = [{"h": d["_id"], "title": d["title"], "count": d["count"]} async for d in trend_col.aggregate(pipeline)]
+    _trend_cache.update(ts=time.time(), items=items)
+    return items
+
+
+def _trending_view(items: list, page: int):
+    pages = max(1, (len(items) + _TREND_PAGE - 1) // _TREND_PAGE)
+    page = max(0, min(page, pages - 1))
+    chunk = items[page * _TREND_PAGE:(page + 1) * _TREND_PAGE]
+    rows = []
+    for i, it in enumerate(chunk):
+        dot = _TREND_DOTS[(page * _TREND_PAGE + i) % len(_TREND_DOTS)]
+        label = f"{dot} {it['title']}"
+        if len(label) > 60:
+            label = label[:57] + "…"
+        rows.append([Btn(label, callback_data=f"tq#{it['h']}")])
+    nav = []
+    if page > 0:
+        nav.append(Btn("⬅️ Back", callback_data=f"tp#{page - 1}"))
+    nav.append(Btn(f"{page + 1}/{pages}", callback_data="noop"))
+    if page < pages - 1:
+        nav.append(Btn("Next ➡️", callback_data=f"tp#{page + 1}"))
+    rows.append(nav)
+    text = (
+        f"🔥 <b>Trending Searches</b>\n<i>Most searched in the last {_TREND_DAYS} days</i>\n\n"
+        f"👇 Tap a title to get its files."
+    )
+    return text, Markup(rows)
+
+
+@Client.on_message(filters.command("trending"))
+async def trending_cmd(_, message):
+    settings = await get_settings()
+    if not settings.get("autofilter_enabled", True):
+        await _maintenance_notice(message)
+        return
+    items = await top_trending(force=True)
+    if not items:
+        await message.reply_text("📭 <b>Nothing is trending yet.</b>\n\nSearch for a title and it will show up here!", quote=True)
+        return
+    text, markup = _trending_view(items, 0)
+    sent = await message.reply_text(text, reply_markup=markup, quote=True)
+    if settings.get("query_autodelete_enabled"):
+        asyncio.create_task(_delete_later(sent, settings["query_autodelete_seconds"]))
+
+
+@Client.on_callback_query(filters.regex(r"^tp#"))
+async def trending_page(_, query):
+    items = await top_trending()
+    if not items:
+        await query.answer("Nothing is trending right now.", show_alert=True)
+        return
+    text, markup = _trending_view(items, int(query.data.split("#")[1]))
+    await query.answer()
+    await _safe_edit(query.message, text, markup)
+
+
+@Client.on_callback_query(filters.regex(r"^tq#"))
+async def trending_click(_, query):
+    if not (await get_settings()).get("autofilter_enabled", True):
+        await query.answer("🛠 Bot is under maintenance. Please try again later.", show_alert=True)
+        return
+    h = query.data.split("#", 1)[1]
+    title = next((i["title"] for i in _trend_cache["items"] if i["h"] == h), None)
+    if not title:
+        doc = await trend_col.find_one({"h": h}, sort=[("day", -1)])
+        title = doc["title"] if doc else None
+    if not title:
+        await query.answer("This list expired — send /trending again.", show_alert=True)
+        return
+    await query.answer("🔎 Searching…")
+
+    from plugins.search import _deliver_results      # lazy: plugins load in alphabetical order
+    results = await search_files(title)
+    if not results:
+        await _safe_edit(
+            query.message,
+            f"❌ <b>{esc(title)}</b> isn't available any more.",
+            Markup([[Btn("⬅️ Back to trending", callback_data="tp#0")]]),
+        )
+        return
+    asyncio.create_task(record_trending(query.from_user.id, results))
+    await _deliver_results(query.message, title, results)
+    try:
+        await query.message.delete()
+    except RPCError:
+        pass
 
 
 
@@ -1463,6 +1893,10 @@ async def extra_help(_, message):
         "<b>🗄 Files</b>\n"
         "• /delete <code>file_link</code> — delete one file (DB or DB + channel)\n"
         "• /deleteall — wipe all indexed files from MongoDB <i>(PM)</i>\n\n"
+        "<b>🔤 Search control</b>\n"
+        "• /set_filterword <code>a, b, phrase</code> · /remove_filterword <code>a, b</code>\n"
+        "• /filterwords · /trending <i>(everyone)</i>\n"
+        "• Autofilter ON/OFF — top button in /settings\n\n"
         "<b>👥 Groups</b>\n"
         "• /show_groups <i>(PM)</i> · /leave_groups <code>group_id</code>"
     )
