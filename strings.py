@@ -17,14 +17,6 @@ settings) — tap/open one and I'll send it to you here in PM.
 /myplan — check your premium status
 /req or /request — request a file if not found
 /trending — most searched titles right now
-/filterwords — words I ignore when searching
-
-<b>Admin commands</b>
-/index — index an entire channel (auto + manual)
-/stats — indexed file count
-/settings — force-sub, premium, verification, result display
-/add_premium, /remove_premium — manage premium users
-/set_shortener, /set_verify_time, /set_tutorial — verification setup
 """
 
 NOT_FOUND_TXT = "❌ No results found for <b>{query}</b>."
