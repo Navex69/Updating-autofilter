@@ -5,15 +5,22 @@ from pyrogram import Client
 from pyrogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from pyrogram.errors import PeerIdInvalid
 
-from config import API_ID, API_HASH, BOT_TOKEN, PORT, ADMINS
+from config import (
+    API_ID, API_HASH, BOT_TOKEN, PORT, ADMINS,
+    BIN_CHANNEL, STREAM_SECRET, STREAM_BASE_URL, ORACLE_STREAM_URL,
+    HELPER_BOT_TOKENS, FASTDL_SERVER_ENABLED, FASTDL_ENABLED,
+)
 from database.filters_db import ensure_indexes
 from database.premium_db import ensure_indexes as ensure_premium_indexes
 from database.verify_db import ensure_indexes as ensure_verify_indexes
 from database.request_db import ensure_indexes as ensure_request_indexes
 from database.settings_db import get_settings
 from database.movie_update_db import movie_update_db
+from log_utils import schedule_restart_notice
 from utils import temp
 from web import web_app
+from fastdl.pool import pool as stream_pool
+import styled_buttons
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,9 +29,11 @@ logging.basicConfig(
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
+styled_buttons.install(BOT_TOKEN)  # blue/green/red button colours (no-op if BUTTON_COLORS=false)
+
 USER_COMMANDS = [
     BotCommand("start", "Start the bot"),
-    BotCommand("trending", "Most searched titles"),
+    BotCommand("help", "How search works"),
     BotCommand("myplan", "Check your premium status"),
     BotCommand("req", "Request a file"),
 ]
@@ -63,11 +72,28 @@ class Bot(Client):
 
         await self._setup_commands()
 
+        if FASTDL_SERVER_ENABLED:
+            # Second session of the main token + any helper bots, download-only.
+            try:
+                await stream_pool.start(API_ID, API_HASH, [BOT_TOKEN] + HELPER_BOT_TOKENS, BIN_CHANNEL)
+            except Exception:
+                logger.exception("Fast-download pool failed to start — bot continues without it")
+
+        if FASTDL_ENABLED:
+            logger.info("Fast Download is ON (hosts: %s)",
+                        ", ".join(n for n, v in (("oracle", ORACLE_STREAM_URL), ("local", STREAM_BASE_URL)) if v))
+        else:
+            missing = [n for n, v in (("BIN_CHANNEL", BIN_CHANNEL), ("STREAM_SECRET", STREAM_SECRET),
+                                      ("STREAM_BASE_URL (or ORACLE_STREAM_URL)", STREAM_BASE_URL or ORACLE_STREAM_URL)) if not v]
+            logger.info("Fast Download is OFF — no buttons shown. Missing: %s", ", ".join(missing))
+
         runner = web.AppRunner(web_app)
         await runner.setup()
         await web.TCPSite(runner, "0.0.0.0", PORT).start()
 
         logger.info("%s started as @%s (health check on :%s)", me.first_name, me.username, PORT)
+
+        schedule_restart_notice()
 
     async def _setup_commands(self):
         """Runs on every boot so a fresh deploy needs zero manual BotFather
@@ -88,6 +114,7 @@ class Bot(Client):
                 logger.warning("Couldn't set the admin command menu for %s", admin_id, exc_info=True)
 
     async def stop(self, *args):
+        await stream_pool.stop()
         await super().stop()
         logger.info("Bot stopped.")
 

@@ -16,7 +16,13 @@ settings) — tap/open one and I'll send it to you here in PM.
 <b>Everyone</b>
 /myplan — check your premium status
 /req or /request — request a file if not found
-/trending — most searched titles right now
+
+<b>Admin commands</b>
+/index — index an entire channel (auto + manual)
+/stats — indexed file count
+/settings — force-sub, premium, verification, result display
+/add_premium, /remove_premium — manage premium users
+/set_shortener, /set_verify_time, /set_tutorial — verification setup
 """
 
 NOT_FOUND_TXT = "❌ No results found for <b>{query}</b>."
@@ -76,8 +82,8 @@ VERIFY_PROMPT_TXT = (
     "📌 You need to complete verification (step {tier}/3) before I can send this file.\n"
     "Tap <b>Verify</b>, follow the page, then come back — I'll send the file automatically."
 )
-VERIFY_BTN = "♻️ Verify"
-VERIFY_TUTORIAL_BTN = "❓ How to verify"
+VERIFY_BTN = "🔐 Verify Now"
+VERIFY_TUTORIAL_BTN = "📖 How to Verify"
 VERIFY_DONE_TXT = "✅ Verification complete! Tap below to get your file."
 VERIFY_GET_FILE_BTN = "📥 Get my file"
 VERIFY_EXPIRED_TXT = "⚠️ This verification link has expired or was already used. Please request the file again."
@@ -210,6 +216,7 @@ MOVIE_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
 MANUAL_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
 
 <blockquote>🎭 ɢᴇɴʀᴇs     : <b>{genres}</b>
+📺 ᴏᴛᴛ          : <b>{ott}</b>
 🎞️ ǫᴜᴀʟɪᴛʏ  : <b>{quality}</b>
 📐 ʀᴇsᴏʟᴜᴛɪᴏɴ : <b>{resolution}</b>
 🎧 ᴀᴜᴅɪᴏ       : <b>{language}</b>
