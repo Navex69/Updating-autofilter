@@ -5,6 +5,7 @@ Follows the clean architecture pattern of this repo.
 import asyncio
 import html
 import logging
+import re
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserIsBlocked
@@ -18,6 +19,20 @@ from strings import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _requested_name(msg) -> str:
+    """Pull ONLY the requested file name out of a request-channel message.
+
+    The channel message also carries the user's mention, ID and the admin
+    instruction line (REQUEST_RECEIVED_TXT). Those are for admins and must
+    never be forwarded to the requester, so we extract just the query.
+    Returned HTML-escaped, ready to drop inside <code>...</code>.
+    """
+    text = (getattr(msg, "text", None) or "").strip()
+    m = re.search(r"Query:\s*(.*?)\s*(?:\n\s*\nPlease check|$)", text, re.S)
+    name = m.group(1).strip() if m else ""
+    return html.escape(name or "your request")
 
 # In-memory deduplication to prevent spam: user_id -> (key, sent request message)
 _REQUEST_DEDUP = {}
@@ -144,9 +159,9 @@ async def not_released_callback(bot, query):
     st = await bot.get_chat_member(chnl_id, query.from_user.id)
     if st.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
         user = await bot.get_users(int(user_id))
-        request = query.message.text
+        request = _requested_name(query.message)
         await query.answer("Message sent to requester")
-        await query.message.edit_text(f"<s>{request}</s>")
+        await query.message.edit_text(f"<s>{html.escape(query.message.text)}</s>")
         await query.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
         try:
             await bot.send_message(
@@ -174,9 +189,9 @@ async def not_available_callback(bot, query):
     st = await bot.get_chat_member(chnl_id, query.from_user.id)
     if st.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
         user = await bot.get_users(int(user_id))
-        request = query.message.text
+        request = _requested_name(query.message)
         await query.answer("Message sent to requester")
-        await query.message.edit_text(f"<s>{request}</s>")
+        await query.message.edit_text(f"<s>{html.escape(query.message.text)}</s>")
         await query.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
         try:
             await bot.send_message(
@@ -202,14 +217,14 @@ async def uploaded_callback(bot, query):
     st = await bot.get_chat_member(chnl_id, query.from_user.id)
     if st.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
         user = await bot.get_users(int(user_id))
-        request = query.message.text
+        request = _requested_name(query.message)
         await query.answer("Message sent to requester")
-        await query.message.edit_text(f"<s>{request}</s>")
+        await query.message.edit_text(f"<s>{html.escape(query.message.text)}</s>")
         await query.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
         try:
             await bot.send_message(
                 chat_id=int(user_id), 
-                text=UPLOADED_TXT,
+                text=UPLOADED_TXT.format(requested_name=request),
                 reply_markup=InlineKeyboardMarkup(btn)
             )
         except UserIsBlocked:
@@ -232,9 +247,9 @@ async def already_available_callback(bot, query):
     st = await bot.get_chat_member(chnl_id, query.from_user.id)
     if st.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
         user = await bot.get_users(int(user_id))
-        request = query.message.text
+        request = _requested_name(query.message)
         await query.answer("Message sent to requester")
-        await query.message.edit_text(f"<s>{request}</s>")
+        await query.message.edit_text(f"<s>{html.escape(query.message.text)}</s>")
         await query.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
         try:
             await bot.send_message(
@@ -262,9 +277,9 @@ async def upload_in_callback(bot, query):
     st = await bot.get_chat_member(chnl_id, query.from_user.id)
     if st.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
         user = await bot.get_users(int(user_id))
-        request = query.message.text
+        request = _requested_name(query.message)
         await query.answer("Message sent to requester")
-        await query.message.edit_text(f"<s>{request}</s>")
+        await query.message.edit_text(f"<s>{html.escape(query.message.text)}</s>")
         await query.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
         try:
             await bot.send_message(
@@ -292,9 +307,9 @@ async def year_callback(bot, query):
     st = await bot.get_chat_member(chnl_id, query.from_user.id)
     if st.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
         user = await bot.get_users(int(user_id))
-        request = query.message.text
+        request = _requested_name(query.message)
         await query.answer("Message sent to requester")
-        await query.message.edit_text(f"<s>{request}</s>")
+        await query.message.edit_text(f"<s>{html.escape(query.message.text)}</s>")
         await query.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
         try:
             await bot.send_message(
@@ -501,7 +516,10 @@ async def handle_custom_reply_input(bot, message):
             try:
                 await bot.send_message(
                     chat_id=user_id,
-                    text=CUSTOM_REPLY_TXT.format(custom_message=message.text),
+                    text=CUSTOM_REPLY_TXT.format(
+                        requested_name=_requested_name(req_msg),
+                        custom_message=html.escape(message.text),
+                    ),
                     reply_markup=InlineKeyboardMarkup(btn)
                 )
             except UserIsBlocked:
@@ -509,7 +527,7 @@ async def handle_custom_reply_input(bot, message):
             
             await message.delete()
             try:
-                await req_msg.edit_text(f"<s>{req_msg.text}</s>")
+                await req_msg.edit_text(f"<s>{html.escape(req_msg.text)}</s>")
                 await req_msg.edit_reply_markup(InlineKeyboardMarkup(buttons))
             except Exception:
                 pass
@@ -530,7 +548,10 @@ async def handle_custom_reply_input(bot, message):
             try:
                 await bot.send_message(
                     chat_id=user_id,
-                    text=WRONG_SPELLING_TXT.format(correct_spelling=message.text),
+                    text=WRONG_SPELLING_TXT.format(
+                        requested_name=_requested_name(req_msg),
+                        correct_spelling=html.escape(message.text),
+                    ),
                     reply_markup=InlineKeyboardMarkup(btn)
                 )
             except UserIsBlocked:
@@ -538,7 +559,7 @@ async def handle_custom_reply_input(bot, message):
             
             await message.delete()
             try:
-                await req_msg.edit_text(f"<s>{req_msg.text}</s>")
+                await req_msg.edit_text(f"<s>{html.escape(req_msg.text)}</s>")
                 await req_msg.edit_reply_markup(InlineKeyboardMarkup(buttons))
             except Exception:
                 pass
