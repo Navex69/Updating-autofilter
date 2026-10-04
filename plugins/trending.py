@@ -13,6 +13,7 @@ from pyrogram import Client, filters
 from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from database.filters_db import clean_display_text
 from database.settings_db import get_settings
 from database.trending_db import get_page, get_by_key
 from strings import (
@@ -36,7 +37,7 @@ async def _build(page: int):
 
     rows = []
     for doc in docs:
-        name = doc["name"]
+        name = clean_display_text(doc["name"]) or doc["name"]
         label = "🔥 " + (name if len(name) <= 55 else name[:52] + "…")
         rows.append([InlineKeyboardButton(label, callback_data=f"trq#{doc['_id']}")])
 
@@ -88,11 +89,12 @@ async def trending_clicked(_, query):
         return
 
     name = doc["name"]
+    shown = clean_display_text(name) or name  # no emojis/symbols on screen
     results = await search_files(name)
     if not results:
         # File was deleted since it was counted — tell the user, keep the list as is.
-        await query.answer(TRENDING_NOT_IN_DB_TXT.format(title=name[:100]), show_alert=True)
+        await query.answer(TRENDING_NOT_IN_DB_TXT.format(title=shown[:100]), show_alert=True)
         return
 
     await query.answer()
-    await _deliver_results(query.message, name, results)
+    await _deliver_results(query.message, shown, results)

@@ -12,7 +12,9 @@ from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE, REQUEST_CHANNEL, ADMINS, SUGGESTION_TIMEOUT, NOT_FOUND_FILE_CHANNEL
-from database.filters_db import search_files, display_name, extract_meta, apply_filters, is_language_year_query
+from database.filters_db import (
+    search_files, display_name, extract_meta, apply_filters, is_language_year_query, clean_display_text,
+)
 from database.settings_db import get_settings
 from database.trending_db import record_search, title_of
 from filterwords import apply_filter_words
@@ -54,6 +56,19 @@ def _strip_tags(text: str) -> str:
 
 def _safe_caption(text: str) -> str:
     return html.escape(_strip_tags(text))
+
+
+# ── what a file is called on the result page ────────────────────────────────
+# Emojis, decorative symbols and empty brackets are removed from the file
+# name / caption (see clean_display_text in database/filters_db.py); the rest
+# of the name is unchanged. The stored caption and the file itself are
+# untouched. Tags are stripped first so "(<b>🔥</b>)" counts as empty too.
+
+def _doc_label(doc: dict) -> str:
+    label = clean_display_text(_strip_tags(display_name(doc)))
+    if not label:  # caption was nothing but emojis/symbols — use the file name
+        label = clean_display_text(_strip_tags(doc.get("file_name", "") or ""))
+    return label or "Unnamed file"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -293,14 +308,14 @@ def _render(key: str, entry: dict, offset: int):
     if entry["mode"] == "text":
         lines = []
         for doc in page:
-            label = _safe_caption(display_name(doc))
+            label = _safe_caption(_doc_label(doc))
             url = f"https://t.me/{temp.U_NAME}?start=file_{doc['_id']}"
             lines.append(f'📁 <a href="{url}">{label}</a> • {human_size(doc.get("file_size", 0))}')
         text = header + "\n\n" + "\n\n".join(lines)
     else:
         text = header
         for doc in page:
-            label = f"{_strip_tags(display_name(doc))} • {human_size(doc.get('file_size', 0))}"
+            label = f"{_strip_tags(_doc_label(doc))} • {human_size(doc.get('file_size', 0))}"
             label = "📁 " + label
             if len(label) > 60:
                 label = label[:57] + "…"
