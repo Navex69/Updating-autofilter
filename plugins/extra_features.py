@@ -9,6 +9,8 @@ Extra admin features — drop-in plugin (auto-loaded, no other file needs editin
   6. /show_groups /leave_groups   manage groups the bot is admin in
   7. /broadcast    any media type, optional pin, live progress, cancel + undo
   8. /stats        full dashboard (channels, users, groups, DB storage, server)
+  9. /link         build a bot search link for a title (+ optional year / season / episode)
+ 10. Admin call    @admin or @bot mention (or reply + mention) -> forwarded to admins with user info
 
 Helper commands:  /extra (command list)   /syncusers (import old users)
 
@@ -34,11 +36,17 @@ from pyrogram.types import InlineKeyboardMarkup as Markup, InlineKeyboardButton 
 
 from config import ADMINS, ENABLE_PM_SEARCH
 from database.client import db
-from database.filters_db import files, get_file_by_id, display_name, count_by_channel
+from database.filters_db import files, get_file_by_id, display_name, count_by_channel, search_files
 from database.premium_db import premium_col
 from database.limit_db import limit_col
 from database.settings_db import get_settings
 from utils import IST, Throttle, readable_time
+
+try:                                   # same link rules the link guard uses
+    from linkcheck import has_link
+except Exception:                      # pragma: no cover
+    def has_link(_message):
+        return False
 
 logger = logging.getLogger(__name__)
 
@@ -1424,6 +1432,332 @@ async def stats_callbacks(bot, query):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 9. /link <name> [year] [sNN] [eNN]
+#    Builds the same deep link the movie-update posts use
+#    (t.me/<bot>?start=getfile-<words>), so tapping it runs a normal search.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_LINK_BUDGET = 56      # /start payload is capped at 64 chars; "getfile-" takes 8
+_YEAR_RE = re.compile(r"(?:19[5-9]\d|20[0-3]\d)")
+
+
+def _parse_link_args(raw: str) -> tuple:
+    """Peel optional year / season / episode off the END of the text.
+    Understood: 2012 · s1 · s01 · season 2 · e5 · ep5 · ep 5 · episode 5 · s01e05.
+    Bare small numbers stay in the name, so "Spider Man 2" is a title, not season 2."""
+    tokens = raw.split()
+    year = season = episode = None
+    while tokens:
+        t = tokens[-1].lower()
+        prev = tokens[-2].lower() if len(tokens) > 1 else ""
+        m = re.fullmatch(r"s(\d{1,2})e(\d{1,3})", t)
+        if m and season is None and episode is None:
+            season, episode = int(m.group(1)), int(m.group(2))
+        elif (m := re.fullmatch(r"(?:ep?|ep\.|episode)(\d{1,3})", t)) and episode is None:
+            episode = int(m.group(1))
+        elif (m := re.fullmatch(r"s(\d{1,2})", t)) and season is None:
+            season = int(m.group(1))
+        elif t.isdigit() and prev in ("season", "s") and season is None and len(tokens) > 2:
+            season = int(t)
+            tokens.pop()
+        elif t.isdigit() and prev in ("episode", "ep", "e") and episode is None and len(tokens) > 2:
+            episode = int(t)
+            tokens.pop()
+        elif _YEAR_RE.fullmatch(t) and year is None and len(tokens) > 1:
+            year = t
+        else:
+            break
+        tokens.pop()
+    return " ".join(tokens), year, season, episode
+
+
+def build_search_link(bot_username: str, name: str, year=None, season=None, episode=None) -> dict:
+    """Returns {"url", "query", "words_dropped", "truncated"} or {"error": ...}."""
+    words = re.findall(r"[A-Za-z0-9]+", name)
+    if not words:
+        return {"error": "The name has no English letters or digits. Bot links can only carry A–Z and 0–9."}
+    dropped = bool(re.search(r"[^\x00-\x7f]", name))
+
+    tags = []
+    if year:
+        tags.append(str(year))
+    if season is not None and episode is not None:
+        tags.append(f"s{season:02d}e{episode:02d}")
+    elif season is not None:
+        tags.append(f"s{season:02d}")
+    elif episode is not None:
+        tags.append(f"ep{episode}")
+    tag_part = "-".join(tags)
+
+    budget = _LINK_BUDGET - (len(tag_part) + 1 if tag_part else 0)
+    name_part, truncated = "", False
+    for w in words:
+        cand = f"{name_part}-{w}" if name_part else w
+        if len(cand) > budget:
+            truncated = True
+            if not name_part:
+                name_part = w[:budget]
+            break
+        name_part = cand
+    payload = f"{name_part}-{tag_part}" if tag_part else name_part
+    return {
+        "url": f"https://t.me/{bot_username}?start=getfile-{payload}",
+        "payload": payload,
+        "query": payload.replace("-", " "),     # exactly what start.py will search
+        "dropped": dropped,
+        "truncated": truncated,
+    }
+
+
+@Client.on_message(filters.command("link") & ADMIN)
+async def link_cmd(bot, message):
+    parts = message.text.split(None, 1)
+    raw = parts[1].strip() if len(parts) > 1 else ""
+    if not raw:
+        await message.reply_text(
+            "🔗 <b>Make a search link</b>\n\n"
+            "<code>/link Jatt and Juliet</code>\n"
+            "<code>/link Jatt and Juliet 2012</code>\n"
+            "<code>/link Kaala s01</code>\n"
+            "<code>/link Kaala s01 e05</code>  <i>(or s01e05)</i>\n"
+            "<code>/link Kaala ep5</code>\n\n"
+            "Year, season and episode are all optional and go <b>after</b> the name.",
+            quote=True,
+        )
+        return
+
+    name, year, season, episode = _parse_link_args(raw)
+    if not name:
+        await message.reply_text("❌ Please give a name before the year / season / episode.", quote=True)
+        return
+    built = build_search_link(bot.me.username, name, year, season, episode)
+    if "error" in built:
+        await message.reply_text(f"❌ {built['error']}", quote=True)
+        return
+
+    try:
+        found = len(await search_files(built["query"]))
+        files_line = f"✅ <b>{found}</b> file(s) found" if found else "⚠️ No files found for this yet"
+    except Exception:
+        files_line = "—"
+
+    shown = [f"🎬 <b>Name:</b> {esc(name)}"]
+    if year:
+        shown.append(f"📆 <b>Year:</b> <code>{year}</code>")
+    if season is not None:
+        shown.append(f"📅 <b>Season:</b> <code>S{season:02d}</code>")
+    if episode is not None:
+        shown.append(f"▶️ <b>Episode:</b> <code>E{episode:02d}</code>")
+    notes = []
+    if built["dropped"]:
+        notes.append("⚠️ Non-English characters were removed — bot links only carry A–Z and 0–9.")
+    if built["truncated"]:
+        notes.append("⚠️ The name was shortened to fit Telegram's 64-character link limit.")
+
+    text = (
+        "🔗 <b>Search link ready</b>\n\n" + "\n".join(shown) +
+        f"\n🔎 <b>Searches for:</b> <code>{esc(built['query'])}</code>\n"
+        f"📁 {files_line}\n\n<code>{esc(built['url'])}</code>"
+    )
+    if notes:
+        text += "\n\n" + "\n".join(notes)
+    await message.reply_text(
+        text,
+        quote=True,
+        disable_web_page_preview=True,
+        reply_markup=Markup([[Btn("🔗 Open link", url=built["url"]), Btn("✖️ Close", callback_data="lk#close")]]),
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^lk#close$") & ADMIN)
+async def link_close(_, query):
+    await query.answer()
+    try:
+        await query.message.delete()
+    except RPCError:
+        pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 10. ADMIN CALL — a user writes @admin (or @admins), the bot's @username, or the
+#     @username of one of the ADMINS, in a group or in the bot's PM — either in a
+#     message of their own or in a reply to someone else's message. The bot
+#     forwards it (plus the replied-to message, if any) to every admin and adds
+#     a user-info card as a reply under the forwarded message.
+#     Runs before search (group -1) and stops propagation, so the text is never
+#     treated as a search query. Messages with links are left to the link guard.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_CALL_KEYWORDS = {"admin", "admins"}
+_MENTION_RE = re.compile(r"(?<![\w@])@([A-Za-z][A-Za-z0-9_]{3,31})(?![\w]|\.\w)")
+_CALL_COOLDOWN = 30
+_call_last: dict = {}
+_admin_names: dict = {"ts": 0.0, "names": set()}
+
+
+async def _admin_usernames(bot) -> set:
+    if time.time() - _admin_names["ts"] < 600:
+        return _admin_names["names"]
+    names = set()
+    try:
+        async for d in users_col.find({"_id": {"$in": list(ADMINS)}}, {"username": 1}):
+            if d.get("username"):
+                names.add(d["username"].lower())
+        missing = len(names) < len(ADMINS)
+    except Exception:
+        missing = True
+    if missing:
+        for aid in ADMINS:
+            try:
+                u = await bot.get_users(aid)
+                if u.username:
+                    names.add(u.username.lower())
+            except Exception:
+                continue
+    _admin_names.update(ts=time.time(), names=names)
+    return names
+
+
+async def _is_admin_call(_, bot, message):
+    u = message.from_user
+    if not u or u.is_bot or u.id in ADMINS:
+        return False
+    if message.chat.type not in (enums.ChatType.PRIVATE, enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+        return False
+    text = message.text or message.caption
+    if not text or text.startswith("/") or has_link(message):
+        return False
+    entities = message.entities or message.caption_entities or []
+    if any(e.type == enums.MessageEntityType.TEXT_MENTION and e.user and e.user.id in ADMINS for e in entities):
+        return True
+    handles = {m.lower() for m in _MENTION_RE.findall(text)}
+    if not handles:
+        return False
+    wanted = _CALL_KEYWORDS | {(bot.me.username or "").lower()}
+    if handles & wanted:
+        return True
+    return bool(handles & await _admin_usernames(bot))
+
+
+admin_call_filter = filters.create(_is_admin_call)
+
+
+async def _forward_any(bot, msg, admin_id: int):
+    """Forward; if the chat forbids forwarding, copy; if that fails too, send the text."""
+    try:
+        return await msg.forward(admin_id)
+    except (FloodWait, UserIsBlocked, PeerIdInvalid, InputUserDeactivated, UserDeactivated):
+        raise
+    except RPCError:
+        pass
+    try:
+        return await msg.copy(admin_id)
+    except (FloodWait, UserIsBlocked, PeerIdInvalid, InputUserDeactivated, UserDeactivated):
+        raise
+    except RPCError:
+        pass
+    body = msg.text or msg.caption or "<non-text message>"
+    return await bot.send_message(admin_id, f"📄 <i>(couldn't forward)</i>\n\n{esc(body[:3500])}")
+
+
+def _first(sent):
+    return sent[0] if isinstance(sent, list) else sent
+
+
+def _admin_call_card(message) -> tuple:
+    u, chat = message.from_user, message.chat
+    lines = [
+        "📨 <b>Admin call</b>\n",
+        f"👤 <b>From:</b> {user_link(u.id, _name_of(u), u.username)}",
+        f"🆔 <b>User ID:</b> <code>{u.id}</code>",
+    ]
+    link = None
+    if chat.type == enums.ChatType.PRIVATE:
+        lines.append("💬 <b>Chat:</b> bot PM")
+    else:
+        g = {"_id": chat.id, "title": chat.title, "username": chat.username}
+        lines.append(f"💬 <b>Group:</b> {group_link(g)}\n🆔 <b>Group ID:</b> <code>{chat.id}</code>")
+        try:
+            link = message.link
+        except Exception:
+            link = None
+    r = message.reply_to_message
+    if r is not None and not r.empty:
+        if r.from_user:
+            ru = r.from_user
+            who = "the bot" if ru.is_bot and ru.id == message.chat.id else user_link(ru.id, _name_of(ru), ru.username)
+            lines.append(f"\n↩️ <b>Replied to:</b> {who} — <code>{ru.id}</code>")
+        else:
+            lines.append("\n↩️ <b>Replied to:</b> a channel / anonymous admin message")
+    lines.append(f"\n🕒 {_fmt_dt(_now())}")
+    lines.append(f"💬 <i>To answer: write your reply, then reply to it with</i> <code>/send {u.id}</code>")
+    buttons = [[Btn("👀 View message", url=link)]] if link else None
+    return "\n".join(lines), Markup(buttons) if buttons else None
+
+
+async def _deliver_admin_call(bot, message) -> int:
+    card, markup = _admin_call_card(message)
+    ctx = message.reply_to_message
+    has_ctx = ctx is not None and not ctx.empty
+    delivered = 0
+    for admin_id in ADMINS:
+        try:
+            if has_ctx:
+                await _forward_any(bot, ctx, admin_id)
+            last = _first(await _forward_any(bot, message, admin_id))
+            await bot.send_message(
+                admin_id, card, reply_to_message_id=last.id,
+                reply_markup=markup, disable_web_page_preview=True,
+            )
+            delivered += 1
+        except FloodWait as e:
+            await asyncio.sleep(min(e.value, 5))
+        except (UserIsBlocked, PeerIdInvalid, InputUserDeactivated, UserDeactivated):
+            logger.info("Admin call: admin %s hasn't started the bot (or blocked it)", admin_id)
+        except RPCError:
+            logger.warning("Admin call: delivery to %s failed", admin_id, exc_info=True)
+    return delivered
+
+
+async def _reply_temp(message, text: str, seconds: int):
+    try:
+        sent = await message.reply_text(text, quote=True)
+    except RPCError:
+        return
+    if message.chat.type != enums.ChatType.PRIVATE:
+        async def _later():
+            await asyncio.sleep(seconds)
+            try:
+                await sent.delete()
+            except RPCError:
+                pass
+        asyncio.create_task(_later())
+
+
+@Client.on_message(admin_call_filter, group=-1)
+async def admin_call(bot, message):
+    uid = message.from_user.id
+    try:
+        wait = _CALL_COOLDOWN - (time.time() - _call_last.get(uid, 0))
+        if wait > 0:
+            await _reply_temp(message, f"⏳ Please wait <b>{int(wait) + 1}s</b> before calling the admin again.", 8)
+        else:
+            _call_last[uid] = time.time()
+            if len(_call_last) > 3000:
+                cutoff = time.time() - _CALL_COOLDOWN
+                for k in [k for k, t in _call_last.items() if t < cutoff]:
+                    _call_last.pop(k, None)
+            if await _deliver_admin_call(bot, message):
+                await _reply_temp(message, "✅ <b>Your message was sent to the admin.</b>\nPlease wait for a reply.", 15)
+            else:
+                _call_last.pop(uid, None)
+                await _reply_temp(message, "⚠️ I couldn't reach the admin right now. Please try again later.", 15)
+    except Exception:
+        logger.exception("admin call failed")
+    message.stop_propagation()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # HELPERS: /syncusers  /extra   (+ nudge when a PM-only command is used in a group)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1463,6 +1797,9 @@ async def extra_help(_, message):
         "<b>🗄 Files</b>\n"
         "• /delete <code>file_link</code> — delete one file (DB or DB + channel)\n"
         "• /deleteall — wipe all indexed files from MongoDB <i>(PM)</i>\n\n"
+        "<b>🔗 Links &amp; support</b>\n"
+        "• /link <code>name [year] [s01 e05]</code> — build a bot search link\n"
+        "• Users writing @admin / the bot's @username are forwarded to you with their info\n\n"
         "<b>👥 Groups</b>\n"
         "• /show_groups <i>(PM)</i> · /leave_groups <code>group_id</code>"
     )

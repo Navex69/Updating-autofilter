@@ -50,6 +50,8 @@ ADMIN_PANEL_TXT = """<b>🔧 Admin Commands Panel</b>
 <b>• /broadcast</b> - Reply to a message to send it to all users <i>(PM)</i>
 <b>• /syncusers</b> - Import old users into the broadcast list <i>(PM)</i>
 <b>• /extra</b> - Short list of the extra commands
+<b>• /link</b> <code>name [year] [s01 e05]</code> - Build a bot search link
+<b>• Admin call</b> - users mentioning @admin / the bot are forwarded to admins
 
 <b>🔗 Verification Setup:</b>
 <b>• /set_shortener</b> - Set verification shortener
