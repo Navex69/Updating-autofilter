@@ -12,7 +12,7 @@ from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE, REQUEST_CHANNEL, ADMINS, SUGGESTION_TIMEOUT, NOT_FOUND_FILE_CHANNEL
-from database.filters_db import search_files, display_name, extract_meta, apply_filters
+from database.filters_db import search_files, display_name, extract_meta, apply_filters, is_language_year_query
 from database.settings_db import get_settings
 from database.trending_db import record_search, title_of
 from filterwords import apply_filter_words
@@ -392,12 +392,17 @@ async def _status_update(message, text: str, markup=None):
         return message
 
 
+async def _no_poster():
+    return None
+
+
 async def _deliver_results(message, resolved_query: str, results: list,
-                            original_query: str | None = None, poster=None):
+                            original_query: str | None = None, poster=None,
+                            skip_poster: bool = False):
     """Send the poster (if found) + the results/filter message — the exact
     same flow whether Stage 1 found it directly or the user just clicked a
     Stage-3 suggestion button."""
-    if poster is None:
+    if poster is None and not skip_poster:
         poster = await fetch_poster(resolved_query)
 
     settings = await get_settings()
@@ -454,16 +459,20 @@ async def handle_search(bot, message):
     status_task = asyncio.create_task(
         message.reply_text(STATUS_STAGE1_TXT.format(query=html.escape(query)), quote=True)
     )
+    # A query that is only language and/or year (e.g. "Hindi 2024") has no
+    # title — so no poster lookup and no trending entry for it.
+    lang_year_only = is_language_year_query(query)
     results, poster = await asyncio.gather(
         search_files(query),
-        fetch_poster(query),
+        _no_poster() if lang_year_only else fetch_poster(query),
     )
     status = await status_task
 
     if results:
         # Stage 1 already found it — the common, fast path.
-        await _deliver_results(message, query, results, poster=poster)
-        asyncio.create_task(record_search(title_of(results, query)))
+        await _deliver_results(message, query, results, poster=poster, skip_poster=lang_year_only)
+        if not lang_year_only:
+            asyncio.create_task(record_search(title_of(results, query)))
         asyncio.create_task(_schedule_delete(status, 0))
         return
 
