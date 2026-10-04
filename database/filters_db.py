@@ -469,6 +469,86 @@ def parse_query(query: str) -> tuple:
     return title, tags
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# LANGUAGE / YEAR ONLY QUERIES — e.g. "Hindi", "2024", "Hindi 2024",
+# "2024 Tamil", "Hindi English 2024". There is no title in such a query, so
+# the exact-title search below has nothing to compare and used to return
+# nothing. Here the language and/or year ARE the search: every file whose
+# name/caption carries them is returned. Only queries made up purely of
+# language names and one year are treated this way — anything else goes
+# through the normal title search exactly as before.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_ALIAS_TO_LANGUAGE = {
+    alias: canonical for canonical, aliases in _LANGUAGE_ALIASES.items() for alias in aliases
+}
+_AUDIO_SUFFIX_RE = re.compile(r"\b(dual|multi)\s+audio\b", re.IGNORECASE)
+_BARE_YEAR_RE = re.compile(r"^(?:19[5-9]\d|20[0-3]\d)$")
+
+
+def parse_language_year_query(query: str):
+    """Return (languages, year) if the query consists ONLY of language
+    name(s) and/or a single year, else None. `languages` is a list of
+    canonical names (may be empty), `year` is a string or None."""
+    tokens = _tokenize(_AUDIO_SUFFIX_RE.sub(r"\1", query or ""))
+    if not tokens:
+        return None
+
+    languages, year = [], None
+    for token in tokens:
+        if _BARE_YEAR_RE.match(token):
+            if year and year != token:
+                return None  # two different years — ambiguous, leave to normal flow
+            year = token
+        elif token in _ALIAS_TO_LANGUAGE:
+            canonical = _ALIAS_TO_LANGUAGE[token]
+            if canonical not in languages:
+                languages.append(canonical)
+        else:
+            return None  # a real title word is present — not a language/year query
+
+    if not languages and not year:
+        return None
+    return languages, year
+
+
+def is_language_year_query(query: str) -> bool:
+    return parse_language_year_query(query) is not None
+
+
+async def _search_by_language_year(query: str) -> list:
+    parsed = parse_language_year_query(query)
+    if not parsed:
+        return []
+    languages, year = parsed
+
+    # The `words` index narrows the candidates; the same regex helpers the
+    # Language / Year filter buttons use then make the final decision, so
+    # results here always agree with those buttons.
+    conditions = []
+    if year:
+        conditions.append({"words": year})
+    for language in languages:
+        tokens = [a for a in _LANGUAGE_ALIASES[language] if " " not in a]
+        conditions.append({"words": {"$in": tokens}})
+    mongo_query = conditions[0] if len(conditions) == 1 else {"$and": conditions}
+
+    cursor = files.find(mongo_query, _RESULT_FIELDS).limit(_CANDIDATE_FETCH)
+    candidates = await cursor.to_list(length=_CANDIDATE_FETCH)
+
+    results = []
+    for doc in candidates:
+        text = _doc_text(doc)
+        if year and _year_of(text) != year:
+            continue
+        if not all(_language_matches(text, language) for language in languages):
+            continue
+        results.append(doc)
+
+    results.sort(key=lambda d: -_quality_rank(_doc_text(d)))
+    return results[:_MAX_FETCH]
+
+
 async def search_files(query: str) -> list:
     """
     Stage 1 search. Deliberately simple and strict:
@@ -494,7 +574,9 @@ async def search_files(query: str) -> list:
     title, tags = parse_query(query)
     query_key = clean_title(title).lower()
     if not query_key:
-        return []
+        # No title left to match — if the query is just language and/or year,
+        # search by those instead of returning nothing.
+        return await _search_by_language_year(query)
 
     words = _tokenize(query_key)
     if not words:
