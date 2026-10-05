@@ -34,7 +34,7 @@ from pyrogram.errors import (
 )
 from pyrogram.types import InlineKeyboardMarkup as Markup, InlineKeyboardButton as Btn
 
-from config import ADMINS, ENABLE_PM_SEARCH
+from config import ADMINS
 from database.client import db
 from database.filters_db import files, get_file_by_id, display_name, count_by_channel, search_files
 from database.premium_db import premium_col
@@ -1386,7 +1386,7 @@ async def build_stats(bot) -> str:
     settings = await get_settings()
 
     other = max(total_files_n - in_channels, 0)
-    pm = "✅" if ENABLE_PM_SEARCH else "❌"
+    pm = "✅" if settings.get("pm_filter_enabled", True) else "❌"
     lines = [
         "📊 <b>Bot Statistics</b>\n",
         f"🔎 <b>Autofilter:</b> 🟢 ON  <i>(Groups ✅ · PM {pm})</i>",

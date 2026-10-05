@@ -11,7 +11,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE, REQUEST_CHANNEL, ADMINS, SUGGESTION_TIMEOUT, NOT_FOUND_FILE_CHANNEL
+from config import RESULTS_PER_PAGE, REQUEST_CHANNEL, ADMINS, SUGGESTION_TIMEOUT, NOT_FOUND_FILE_CHANNEL, MOVIE_GROUP_LINK
 from database.filters_db import (
     search_files, display_name, extract_meta, apply_filters, is_language_year_query, clean_display_text,
 )
@@ -30,6 +30,7 @@ from strings import (
     SUGGESTIONS_HEADER_TXT, SUGGESTION_NOT_FOUND_TXT,
     REQUEST_BTN_TXT, REQUEST_NOT_CONFIGURED_TXT, REQUEST_SENT_TXT,
     MAINTENANCE_TXT, EMPTY_QUERY_TXT,
+    PM_SEARCH_OFF_TXT, PM_SEARCH_OFF_BTN,
 )
 
 logger = logging.getLogger(__name__)
@@ -385,7 +386,10 @@ def _search_filter(_, __, message):
     if message.outgoing or (sender and (sender.is_self or sender.is_bot)):
         return False
     if message.chat.type == enums.ChatType.PRIVATE:
-        return ENABLE_PM_SEARCH
+        # Always let a DM query through to handle_search(): whether PM search is
+        # ON or OFF is an admin switch (/settings -> PM Filter) checked there, so
+        # that when it is OFF the user gets the "search in group" reply.
+        return True
     return message.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP)
 
 
@@ -457,6 +461,19 @@ async def handle_search(bot, message):
         return
 
     settings = await get_settings()
+
+    # PM Filter switch — only affects the bot's DM. Group search stays always on.
+    if message.chat.type == enums.ChatType.PRIVATE and not settings["pm_filter_enabled"]:
+        mention = message.from_user.mention if message.from_user else "there"
+        markup = (
+            InlineKeyboardMarkup([[InlineKeyboardButton(PM_SEARCH_OFF_BTN, url=MOVIE_GROUP_LINK)]])
+            if MOVIE_GROUP_LINK else None
+        )
+        await message.reply_text(
+            PM_SEARCH_OFF_TXT.format(mention=mention), reply_markup=markup, quote=True,
+        )
+        return
+
     if not settings["autofilter_enabled"]:
         await message.reply_text(MAINTENANCE_TXT, quote=True)
         return

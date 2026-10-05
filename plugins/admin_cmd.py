@@ -17,13 +17,16 @@ ADMIN_PANEL_TXT = """<b>🔧 Admin Commands Panel</b>
 <b>📋 Available Commands:</b>
 
 <b>• /admin</b> - Show this admin commands panel
-<b>• /settings</b> - Open admin settings panel
+<b>• /settings</b> - Open admin settings panel (autofilter, PM filter, welcome, premium…)
 
 <b>📚 Indexing & Stats:</b>
 <b>• /index</b> - Index an entire channel (auto + manual)
 <b>• /stats</b> - Full bot dashboard (channels, users, groups, DB, server)
 <b>• /delete</b> <code>file_link</code> - Delete one file (database or database + channel)
 <b>• /deleteall</b> - Delete all indexed files from MongoDB <i>(PM)</i>
+
+<b>🖼 Media Links:</b>
+<b>• /telegraph</b> - Reply to a photo/video (or send one) to get a link + file_id <i>(admin only)</i>
 
 <b>🎬 Movie Updates:</b>
 <b>• /m title [year] [s02]</b> - Post a movie/series update (e.g. <code>/m pushpa 2</code>, <code>/m suits s02</code>)
