@@ -1,14 +1,4 @@
-START_TXT = """👋 <b>Hi {mention}!</b>
-
-I'm an autofilter bot — add me to a group, index a channel's files into me, \
-and members can just type a movie/show name to search.
-
-<b>Commands:</b>
-/help — how search works
-/trending — most searched titles
-/filterwords — words ignored in searches
-/myplan — check your premium status
-"""
+START_TXT = """<b>𝐻𝐸𝑌 {mention} 👋, \n\n𝑆𝐸𝑁𝐷 𝑀𝐸 𝑀𝑂𝑉𝐼𝐸, 𝑆𝐸𝑅𝐼𝐸𝑆, 𝐴𝑁𝐼𝑀𝐸, 𝑆𝐻𝑂𝑊'𝑆 𝑒𝑡𝑐. 𝑁𝐴𝑀𝐸 𝑊𝐼𝑇𝐻 𝐶𝑂𝑅𝑅𝐸𝐶𝑇 𝑆𝑃𝐸𝐿𝐿𝐼𝑁𝐺 😍\n\n<blockquote>🌿 ᴍᴀɪɴᴛᴀɪɴᴇᴅ ʙʏ : <a href="https://t.me/Navex_69">ɴᴀᴠᴇx</a></blockquote></b>"""
 
 HELP_TXT = """<b>How to search</b>
 Just type a name in the group, e.g. <code>Inception 2010</code>.
@@ -347,3 +337,33 @@ TELEGRAPH_DONE_TXT = (
     "🆔 <b>file_id</b> (use for WELCOME_VIDEO / PREMIUM_PHOTO):\n<code>{file_id}</code>\n\n"
     "Paste the link or file_id into <code>config.py</code>."
 )
+
+# ── Premium page (shown by the "premium" button) ──────────────────────────────
+PREMIUM_TEXT = """<b><i><blockquote>ᴀᴠᴀɪʟᴀʙʟᴇ ᴘʟᴀɴs  ♻️</blockquote>
+
+• 𝟷 ᴡᴇᴇᴋ  -  ₹15
+• 𝟷 ᴍᴏɴᴛʜ  -  ₹50
+• 2 ᴍᴏɴᴛʜs  -  ₹80
+• 3 ᴍᴏɴᴛʜs  -  ₹100
+
+•─────•─────────•─────•
+<blockquote>ᴘʀᴇᴍɪᴜᴍ ꜰᴇᴀᴛᴜʀᴇs  🎁</blockquote>
+
+○ ɴᴏ ɴᴇᴇᴅ ᴛᴏ ᴠᴇʀɪꜰʏ
+○ ᴅɪʀᴇᴄᴛ ꜰɪʟᴇs   
+○ ᴀᴅ-ꜰʀᴇᴇ ᴇxᴘᴇʀɪᴇɴᴄᴇ 
+○ ʜɪɢʜ-sᴘᴇᴇᴅ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋ                         
+○ ᴍᴜʟᴛɪ-ᴘʟᴀʏᴇʀ sᴛʀᴇᴀᴍɪɴɢ ʟɪɴᴋs                           
+○ ᴜɴʟɪᴍɪᴛᴇᴅ ᴍᴏᴠɪᴇꜱ, ꜱᴇʀɪᴇꜱ & ᴀɴɪᴍᴇ                                                                         
+○ ꜰᴜʟʟ ᴀᴅᴍɪɴ sᴜᴘᴘᴏʀᴛ                              
+○ ʀᴇǫᴜᴇsᴛ ᴡɪʟʟ ʙᴇ ᴄᴏᴍᴘʟᴇᴛᴇᴅ ɪɴ 𝟷ʜ
+•─────•─────────•─────•
+
+
+✨ ᴜᴘɪ ɪᴅ - <code>navex69@axl</code>
+
+ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴀᴄᴛɪᴠᴇ ᴘʟᴀɴ  /myplan
+
+💢 ᴍᴜsᴛ sᴇɴᴅ sᴄʀᴇᴇɴsʜᴏᴛ ᴀꜰᴛᴇʀ ᴘᴀʏᴍᴇɴᴛ
+
+‼️ ᴀꜰᴛᴇʀ sᴇɴᴅɪɴɢ ᴀ sᴄʀᴇᴇɴsʜᴏᴛ ᴘʟᴇᴀsᴇ ɢɪᴠᴇ ᴍᴇ sᴏᴍᴇ ᴛɪᴍᴇ ᴛᴏ ᴀᴅᴅ ʏᴏᴜ ɪɴ ᴛʜᴇ ᴘʀᴇᴍɪᴜᴍ ᴠᴇʀsɪᴏɴ.</i></b>"""
