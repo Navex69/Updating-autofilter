@@ -308,3 +308,42 @@ REMOVE_FILTERWORD_OK = (
 TRENDING_HEADER_TXT = "🔥 <b>Trending Searches</b>\n\nMost searched titles — tap one to get its files:"
 TRENDING_EMPTY_TXT = "🔥 No trending searches yet. Search for something first!"
 TRENDING_NOT_IN_DB_TXT = "❌ {title} isn't in the database anymore."
+
+# ── PM filter (admin switch in /settings) ──────────────────────────────────────
+PM_FILTER_INFO_TXT = "PM Filter ON: the bot searches movie names typed in its DM. OFF: it asks users to search in the movie group instead. Group search always stays ON."
+PM_SEARCH_OFF_TXT = (
+    "<b>👋 ʜᴇʏ {mention}!\n\n"
+    "🚫 ᴍᴏᴠɪᴇ sᴇᴀʀᴄʜ ɪɴ ʙᴏᴛ ᴘᴍ ɪs ᴛᴜʀɴᴇᴅ ᴏꜰꜰ.\n"
+    "🎬 ᴘʟᴇᴀsᴇ sᴇᴀʀᴄʜ ʏᴏᴜʀ ᴍᴏᴠɪᴇ ɪɴ ᴏᴜʀ ᴍᴏᴠɪᴇ ɢʀᴏᴜᴘ — ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ 👇</b>"
+)
+PM_SEARCH_OFF_BTN = "🎬 ᴍᴏᴠɪᴇ ɢʀᴏᴜᴘ"
+
+# ── Welcome message switch ─────────────────────────────────────────────────────
+WELCOME_INFO_TXT = "Welcome ON: when someone joins a group where I'm admin, I send the welcome video with their mention. OFF: no welcome message."
+
+# ── Premium page ───────────────────────────────────────────────────────────────
+PREMIUM_OWNER_BTN = "👤 ᴏᴡɴᴇʀ"
+PREMIUM_MYPLAN_BTN = "💎 ᴍʏ ᴘʟᴀɴ"
+PREMIUM_BACK_BTN = "⬅️ ʙᴀᴄᴋ"
+MYPLAN_ALERT_ACTIVE = "💎 Premium active\nExpires: {expiry}"
+MYPLAN_ALERT_NONE = "You don't have an active premium plan.\nTap Owner to buy one."
+
+# ── /telegraph ─────────────────────────────────────────────────────────────────
+TELEGRAPH_PROMPT_TXT = (
+    "📎 Send me a <b>photo or video</b> (reply to one with /telegraph, or send it now).\n"
+    "I'll give you a link + the Telegram <code>file_id</code>.\n\n"
+    "<i>Waiting 60 seconds…</i>"
+)
+TELEGRAPH_TIMEOUT_TXT = "⏳ Timed out. Send /telegraph again."
+TELEGRAPH_NOT_MEDIA_TXT = "❌ That's not a photo or video. Send /telegraph again."
+TELEGRAPH_TOO_BIG_TXT = "❌ File too big: <b>{size}</b> (max <b>{limit}</b> for the current provider)."
+TELEGRAPH_DOWNLOADING_TXT = "⬇️ Downloading…"
+TELEGRAPH_UPLOADING_TXT = "⬆️ Uploading…"
+TELEGRAPH_FAILED_TXT = "❌ Upload failed on every provider.\n<code>{error}</code>"
+TELEGRAPH_DONE_TXT = (
+    "✅ <b>Link ready</b>\n\n"
+    "🔗 <code>{url}</code>\n"
+    "🌐 Host: <code>{host}</code>\n\n"
+    "🆔 <b>file_id</b> (use for WELCOME_VIDEO / PREMIUM_PHOTO):\n<code>{file_id}</code>\n\n"
+    "Paste the link or file_id into <code>config.py</code>."
+)

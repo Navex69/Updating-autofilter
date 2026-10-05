@@ -48,8 +48,71 @@ CHANNELS = _int_list("CHANNELS", "-1002407564854")
 # ── Search behaviour ──────────────────────────────────────────────────────────
 # Search works in groups always. Private-chat search can be switched off here
 # (e.g. to force people into a group) without touching any code.
+# NOTE: ENABLE_PM_SEARCH is now only the *first-boot default* of the "PM Filter"
+# switch. After that, admins control it live from /settings -> "PM Filter"
+# (stored in the database). Group search is never affected by this switch.
 ENABLE_PM_SEARCH = _bool("ENABLE_PM_SEARCH", True)
 RESULTS_PER_PAGE = int(os.environ.get("RESULTS_PER_PAGE", "8"))
+
+# Shown (with a button) when PM Filter is OFF and someone types a movie name
+# in the bot's DM: "search your movie in our group". Leave "" to hide the button.
+MOVIE_GROUP_LINK = os.environ.get("MOVIE_GROUP_LINK", "https://t.me/Navex_Movies")
+
+# ── Welcome video, /start message & buttons ─────────────────────────────────
+# WELCOME_VIDEO: the file_id of a video already on Telegram (it is sent as a
+# real, playable video — never as a link). Get the file_id by sending the video
+# to the bot with /telegraph (admin only) — it replies with the file_id.
+# NOTE: file_ids only work for the bot that "saw" the file, so upload/forward the
+# video to THIS bot first. A direct https:// video URL also works.
+WELCOME_VIDEO = os.environ.get("WELCOME_VIDEO", "").strip()
+
+# Buttons under the /start message (private chat). One inner list = one row.
+# Every button is a tuple:  (button text, "url" or "callback", value)
+#   ("url", value)       -> opens a link.  {bot} is replaced by the bot's @username
+#   ("callback", value)  -> built-in actions:  "premium"  (premium plans page)
+# Add / remove rows and buttons freely.
+START_BUTTONS = [
+    [("⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘs ⇆", "url", "http://t.me/{bot}?startgroup=start")],
+    [
+        ("• Movie Group", "url", "https://t.me/Navex_Movies"),
+        ("• Pʀᴇᴍɪᴜᴍ", "callback", "premium"),
+    ],
+]
+
+# Buttons under the welcome video inside GROUPS (join welcome + /start in a group).
+# Link buttons only (same tuple format) — callback buttons are PM-only.
+WELCOME_BUTTONS = [
+    [("⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘs ⇆", "url", "http://t.me/{bot}?startgroup=start")],
+    [
+        ("• Movie Group", "url", "https://t.me/Navex_Movies"),
+        ("• Bot PM", "url", "http://t.me/{bot}?start=start"),
+    ],
+]
+
+# Text sent with the video when someone JOINS a group. {mention} = the new
+# member(s), {chat} = group name. (HTML allowed.)
+GROUP_WELCOME_TXT = (
+    "<b>👋 ᴡᴇʟᴄᴏᴍᴇ {mention} ᴛᴏ {chat}!\n\n"
+    "🎬 ᴊᴜsᴛ ᴛʏᴘᴇ ᴀ ᴍᴏᴠɪᴇ / sᴇʀɪᴇs ɴᴀᴍᴇ ʜᴇʀᴇ ᴀɴᴅ ɪ'ʟʟ ꜰɪɴᴅ ɪᴛ ꜰᴏʀ ʏᴏᴜ.\n"
+    "📹 ᴡᴀᴛᴄʜ ᴛʜᴇ ᴠɪᴅᴇᴏ ᴀʙᴏᴠᴇ ᴛᴏ sᴇᴇ ʜᴏᴡ ɪ ᴡᴏʀᴋ.</b>"
+)
+# Delete the welcome message after N seconds (0 = never). The previous welcome
+# in the same group is always replaced, so busy groups don't fill up with them.
+WELCOME_DELETE_AFTER = int(os.environ.get("WELCOME_DELETE_AFTER", "120"))
+
+# ── Premium page ─────────────────────────────────────────────────────────────
+# Photo shown on the premium page: a file_id, or a link (e.g. made with /telegraph).
+# Leave "" to show the premium text without a photo. The premium TEXT itself
+# lives in Script.py (script.PREMIUM_TEXT).
+PREMIUM_PHOTO = os.environ.get("PREMIUM_PHOTO", "").strip()
+# "Owner" button on the premium page (people contact this to buy a plan).
+OWNER_LINK = os.environ.get("OWNER_LINK", "https://t.me/Navex_69")
+
+# ── /telegraph (admin) — media -> link uploader ──────────────────────────────
+# "auto"      : telegra.ph for files up to 5 MB, Catbox as fallback / for bigger files
+# "telegraph" : telegra.ph / graph.org only (max 5 MB)
+# "catbox"    : catbox.moe only (max 200 MB)
+TELEGRAPH_PROVIDER = os.environ.get("TELEGRAPH_PROVIDER", "auto").strip().lower()
 
 # ── Automatic poster fetch (TMDB primary, OMDb fallback) ───────────────────
 # Both optional — leave unset to disable poster fetching entirely. Get a free
