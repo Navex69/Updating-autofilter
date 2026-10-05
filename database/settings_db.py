@@ -13,7 +13,7 @@ per-request DB cost no matter how many features are toggled on.
 import logging
 
 from database.client import db
-from config import CHANNELS, FETCH_MOVIE_UPDATE
+from config import CHANNELS, FETCH_MOVIE_UPDATE, ENABLE_PM_SEARCH
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,11 @@ DEFAULTS = {
     "file_limit_count": 2,
     "movie_update_notification": True,
     "autofilter_enabled": True,   # False -> bot replies "under maintenance" instead of searching
+    # False -> typed queries in the bot's DM are NOT searched; the user is sent to
+    # the movie group instead. Group search is never affected. First-boot value
+    # comes from config.ENABLE_PM_SEARCH, after that /settings controls it.
+    "pm_filter_enabled": ENABLE_PM_SEARCH,
+    "welcome_enabled": True,      # video welcome when someone joins a group
     "filter_words": [],           # words/phrases dropped from every search query
 }
 
