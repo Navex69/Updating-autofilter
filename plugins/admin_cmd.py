@@ -17,13 +17,16 @@ ADMIN_PANEL_TXT = """<b>🔧 Admin Commands Panel</b>
 <b>📋 Available Commands:</b>
 
 <b>• /admin</b> - Show this admin commands panel
-<b>• /settings</b> - Open admin settings panel
+<b>• /settings</b> - Open admin settings panel (autofilter, PM filter, welcome, premium…)
 
 <b>📚 Indexing & Stats:</b>
 <b>• /index</b> - Index an entire channel (auto + manual)
 <b>• /stats</b> - Full bot dashboard (channels, users, groups, DB, server)
 <b>• /delete</b> <code>file_link</code> - Delete one file (database or database + channel)
 <b>• /deleteall</b> - Delete all indexed files from MongoDB <i>(PM)</i>
+
+<b>🖼 Media Links:</b>
+<b>• /telegraph</b> - Reply to a photo/video (or send one) to get a link + file_id <i>(admin only)</i>
 
 <b>🎬 Movie Updates:</b>
 <b>• /m title [year] [s02]</b> - Post a movie/series update (e.g. <code>/m pushpa 2</code>, <code>/m suits s02</code>)
@@ -50,11 +53,19 @@ ADMIN_PANEL_TXT = """<b>🔧 Admin Commands Panel</b>
 <b>• /broadcast</b> - Reply to a message to send it to all users <i>(PM)</i>
 <b>• /syncusers</b> - Import old users into the broadcast list <i>(PM)</i>
 <b>• /extra</b> - Short list of the extra commands
+<b>• /link</b> <code>name [year] [s01 e05]</code> - Build a bot search link
+<b>• Admin call</b> - users mentioning @admin / the bot are forwarded to admins
 
 <b>🔗 Verification Setup:</b>
 <b>• /set_shortener</b> - Set verification shortener
 <b>• /set_verify_time</b> - Set verification time gaps
 <b>• /set_tutorial</b> - Set verification tutorial links
+
+<b>🚫 Search Filters:</b>
+<b>• /set_filterword</b> <code>word, phrase</code> - Words ignored in every search
+<b>• /remove_filterword</b> <code>word, phrase</code> - Remove ignored words
+<b>• /filterwords</b> - Show all filter words
+<b>• /trending</b> - Most searched titles
 
 <b>ℹ️ Note:</b> Auto movie updates, fetch channels and requests are managed through the settings panel."""
 

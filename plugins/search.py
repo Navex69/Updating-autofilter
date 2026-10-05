@@ -11,9 +11,14 @@ from pyrogram import Client, filters, enums
 from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import ENABLE_PM_SEARCH, RESULTS_PER_PAGE, REQUEST_CHANNEL, ADMINS, SUGGESTION_TIMEOUT, NOT_FOUND_FILE_CHANNEL
-from database.filters_db import search_files, display_name, extract_meta, apply_filters
+from config import RESULTS_PER_PAGE, REQUEST_CHANNEL, ADMINS, SUGGESTION_TIMEOUT, NOT_FOUND_FILE_CHANNEL, MOVIE_GROUP_LINK
+from database.filters_db import (
+    search_files, display_name, extract_meta, apply_filters, is_language_year_query, clean_display_text,
+)
 from database.settings_db import get_settings
+from database.trending_db import record_search, title_of
+from filterwords import apply_filter_words
+from linkcheck import has_link
 from poster import fetch_poster
 from spellcheck import fuzzy_correct, suggest_titles
 from utils import temp, human_size
@@ -24,6 +29,8 @@ from strings import (
     STATUS_STAGE1_TXT, STATUS_STAGE2_TXT, STATUS_STAGE3_TXT,
     SUGGESTIONS_HEADER_TXT, SUGGESTION_NOT_FOUND_TXT,
     REQUEST_BTN_TXT, REQUEST_NOT_CONFIGURED_TXT, REQUEST_SENT_TXT,
+    MAINTENANCE_TXT, EMPTY_QUERY_TXT,
+    PM_SEARCH_OFF_TXT, PM_SEARCH_OFF_BTN,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,6 +57,19 @@ def _strip_tags(text: str) -> str:
 
 def _safe_caption(text: str) -> str:
     return html.escape(_strip_tags(text))
+
+
+# ── what a file is called on the result page ────────────────────────────────
+# Emojis, decorative symbols and empty brackets are removed from the file
+# name / caption (see clean_display_text in database/filters_db.py); the rest
+# of the name is unchanged. The stored caption and the file itself are
+# untouched. Tags are stripped first so "(<b>🔥</b>)" counts as empty too.
+
+def _doc_label(doc: dict) -> str:
+    label = clean_display_text(_strip_tags(display_name(doc)))
+    if not label:  # caption was nothing but emojis/symbols — use the file name
+        label = clean_display_text(_strip_tags(doc.get("file_name", "") or ""))
+    return label or "Unnamed file"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -140,7 +160,7 @@ def _suggestion_cache_get(key: str) -> list | None:
 def _suggestion_keyboard(key: str, titles: list) -> InlineKeyboardMarkup:
     rows = []
     for i, title in enumerate(titles):
-        label = title if len(title) <= 60 else title[:57] + "…"
+        label = "🎬 " + (title if len(title) <= 55 else title[:52] + "…")
         rows.append([InlineKeyboardButton(label, callback_data=f"sug#{key}#{i}")])
     return InlineKeyboardMarkup(rows)
 
@@ -253,7 +273,7 @@ def _nav_row(key: str, offset: int, total: int) -> list:
     current_page = offset // RESULTS_PER_PAGE + 1
     nav = [InlineKeyboardButton("⬅️", callback_data=f"pg#{key}#{max(0, offset - RESULTS_PER_PAGE)}")] \
         if offset > 0 else []
-    nav.append(InlineKeyboardButton(f"{current_page}/{total_pages}", callback_data="noop"))
+    nav.append(InlineKeyboardButton(f"📄 {current_page}/{total_pages}", callback_data="noop"))
     if offset + RESULTS_PER_PAGE < total:
         nav.append(InlineKeyboardButton("➡️", callback_data=f"pg#{key}#{offset + RESULTS_PER_PAGE}"))
     return nav
@@ -289,14 +309,15 @@ def _render(key: str, entry: dict, offset: int):
     if entry["mode"] == "text":
         lines = []
         for doc in page:
-            label = _safe_caption(display_name(doc))
+            label = _safe_caption(_doc_label(doc))
             url = f"https://t.me/{temp.U_NAME}?start=file_{doc['_id']}"
             lines.append(f'📁 <a href="{url}">{label}</a> • {human_size(doc.get("file_size", 0))}')
         text = header + "\n\n" + "\n\n".join(lines)
     else:
         text = header
         for doc in page:
-            label = f"{_strip_tags(display_name(doc))} • {human_size(doc.get('file_size', 0))}"
+            label = f"{_strip_tags(_doc_label(doc))} • {human_size(doc.get('file_size', 0))}"
+            label = "📁 " + label
             if len(label) > 60:
                 label = label[:57] + "…"
             rows.append([InlineKeyboardButton(
@@ -355,6 +376,8 @@ async def _expired(message):
 def _search_filter(_, __, message):
     if not message.text or message.text.startswith("/"):
         return False
+    if has_link(message):  # links are never a search query
+        return False
     # The bot's own messages (restart notice, "Searching..." status, results)
     # come back to it as updates — they must never be treated as a query, or
     # every reply the bot sends triggers another search. Only real users and
@@ -363,7 +386,10 @@ def _search_filter(_, __, message):
     if message.outgoing or (sender and (sender.is_self or sender.is_bot)):
         return False
     if message.chat.type == enums.ChatType.PRIVATE:
-        return ENABLE_PM_SEARCH
+        # Always let a DM query through to handle_search(): whether PM search is
+        # ON or OFF is an admin switch (/settings -> PM Filter) checked there, so
+        # that when it is OFF the user gets the "search in group" reply.
+        return True
     return message.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP)
 
 
@@ -385,12 +411,17 @@ async def _status_update(message, text: str, markup=None):
         return message
 
 
+async def _no_poster():
+    return None
+
+
 async def _deliver_results(message, resolved_query: str, results: list,
-                            original_query: str | None = None, poster=None):
+                            original_query: str | None = None, poster=None,
+                            skip_poster: bool = False):
     """Send the poster (if found) + the results/filter message — the exact
     same flow whether Stage 1 found it directly or the user just clicked a
     Stage-3 suggestion button."""
-    if poster is None:
+    if poster is None and not skip_poster:
         poster = await fetch_poster(resolved_query)
 
     settings = await get_settings()
@@ -429,21 +460,51 @@ async def handle_search(bot, message):
     if not query:
         return
 
+    settings = await get_settings()
+
+    # PM Filter switch — only affects the bot's DM. Group search stays always on.
+    if message.chat.type == enums.ChatType.PRIVATE and not settings["pm_filter_enabled"]:
+        mention = message.from_user.mention if message.from_user else "there"
+        markup = (
+            InlineKeyboardMarkup([[InlineKeyboardButton(PM_SEARCH_OFF_BTN, url=MOVIE_GROUP_LINK)]])
+            if MOVIE_GROUP_LINK else None
+        )
+        await message.reply_text(
+            PM_SEARCH_OFF_TXT.format(mention=mention), reply_markup=markup, quote=True,
+        )
+        return
+
+    if not settings["autofilter_enabled"]:
+        await message.reply_text(MAINTENANCE_TXT, quote=True)
+        return
+
+    # Admin-defined filter words are dropped from the query before searching.
+    if settings["filter_words"]:
+        query = apply_filter_words(query, settings["filter_words"])
+        if not query:
+            await message.reply_text(EMPTY_QUERY_TXT, quote=True)
+            return
+
     # The "Searching..." status message is sent concurrently with the real
     # Stage 1 work below, not before it — so showing search progress never
     # adds latency to the common case where Stage 1 already finds it.
     status_task = asyncio.create_task(
         message.reply_text(STATUS_STAGE1_TXT.format(query=html.escape(query)), quote=True)
     )
+    # A query that is only language and/or year (e.g. "Hindi 2024") has no
+    # title — so no poster lookup and no trending entry for it.
+    lang_year_only = is_language_year_query(query)
     results, poster = await asyncio.gather(
         search_files(query),
-        fetch_poster(query),
+        _no_poster() if lang_year_only else fetch_poster(query),
     )
     status = await status_task
 
     if results:
         # Stage 1 already found it — the common, fast path.
-        await _deliver_results(message, query, results, poster=poster)
+        await _deliver_results(message, query, results, poster=poster, skip_poster=lang_year_only)
+        if not lang_year_only:
+            asyncio.create_task(record_search(title_of(results, query)))
         asyncio.create_task(_schedule_delete(status, 0))
         return
 
@@ -460,6 +521,7 @@ async def handle_search(bot, message):
         # title and likely came back empty — retry with the corrected one.
         poster = poster or await fetch_poster(resolved_query)
         await _deliver_results(message, resolved_query, results, original_query=query, poster=poster)
+        asyncio.create_task(record_search(title_of(results, resolved_query)))
         asyncio.create_task(_schedule_delete(status, 0))
         return
 

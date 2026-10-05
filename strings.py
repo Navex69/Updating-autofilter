@@ -1,12 +1,4 @@
-START_TXT = """👋 <b>Hi {mention}!</b>
-
-I'm an autofilter bot — add me to a group, index a channel's files into me, \
-and members can just type a movie/show name to search.
-
-<b>Commands:</b>
-/help — how search works
-/myplan — check your premium status
-"""
+START_TXT = """<b>𝐻𝐸𝑌 {mention} 👋, \n\n𝑆𝐸𝑁𝐷 𝑀𝐸 𝑀𝑂𝑉𝐼𝐸, 𝑆𝐸𝑅𝐼𝐸𝑆, 𝐴𝑁𝐼𝑀𝐸, 𝑆𝐻𝑂𝑊'𝑆 𝑒𝑡𝑐. 𝑁𝐴𝑀𝐸 𝑊𝐼𝑇𝐻 𝐶𝑂𝑅𝑅𝐸𝐶𝑇 𝑆𝑃𝐸𝐿𝐿𝐼𝑁𝐺 😍\n\n<blockquote>🌿 ᴍᴀɪɴᴛᴀɪɴᴇᴅ ʙʏ : <a href="https://t.me/Navex_69">ɴᴀᴠᴇx</a></blockquote></b>"""
 
 HELP_TXT = """<b>How to search</b>
 Just type a name in the group, e.g. <code>Inception 2010</code>.
@@ -16,6 +8,8 @@ settings) — tap/open one and I'll send it to you here in PM.
 <b>Everyone</b>
 /myplan — check your premium status
 /req or /request — request a file if not found
+/trending — most searched titles
+/filterwords — words ignored in searches
 
 <b>Admin commands</b>
 /index — index an entire channel (auto + manual)
@@ -23,6 +17,7 @@ settings) — tap/open one and I'll send it to you here in PM.
 /settings — force-sub, premium, verification, result display
 /add_premium, /remove_premium — manage premium users
 /set_shortener, /set_verify_time, /set_tutorial — verification setup
+/set_filterword, /remove_filterword — manage ignored search words
 """
 
 NOT_FOUND_TXT = "❌ No results found for <b>{query}</b>."
@@ -82,8 +77,8 @@ VERIFY_PROMPT_TXT = (
     "📌 You need to complete verification (step {tier}/3) before I can send this file.\n"
     "Tap <b>Verify</b>, follow the page, then come back — I'll send the file automatically."
 )
-VERIFY_BTN = "♻️ Verify"
-VERIFY_TUTORIAL_BTN = "❓ How to verify"
+VERIFY_BTN = "🔐 Verify Now"
+VERIFY_TUTORIAL_BTN = "📖 How to Verify"
 VERIFY_DONE_TXT = "✅ Verification complete! Tap below to get your file."
 VERIFY_GET_FILE_BTN = "📥 Get my file"
 VERIFY_EXPIRED_TXT = "⚠️ This verification link has expired or was already used. Please request the file again."
@@ -196,11 +191,11 @@ REQUEST_AUTO_TIMEOUT_TXT = "⏳ No interaction — auto-sending request to admin
 ALREADY_AVAILABLE_TXT = "📌 Requested – <code>{requested_name}</code>\n\nYour request is already available 😋, just re-send movie name in group."
 NOT_RELEASED_TXT = "📌 Requested – <code>{requested_name}</code>\n\nSorry your request is not released yet 😢. Admin keep monitor your requests, wait for release and then send requested file name in group."
 NOT_AVAILABLE_TXT = "❌ Your requested movie is not available on the internet.\n\n📌 Requested – <code>{requested_name}</code>"
-UPLOADED_TXT = "Your request is uploaded ☺️, just re-send movie name in group"
+UPLOADED_TXT = "📌 Requested – <code>{requested_name}</code>\n\nYour request is uploaded ☺️, just re-send movie name in group."
 CHECK_SPELLING_TXT = "📌 Requested – <code>{requested_name}</code>\n\nAdmin can't find any movie and series of this name. Make sure, your spelling is correct ⚠️. Check spelling on google and then request again ❗"
 YEAR_LANGUAGE_TXT = "📌 Requested – <code>{requested_name}</code>\n\nBro please tell me years, language, bollywood or hollywood etc., then I will upload 😬. Just re-send request with more info."
-WRONG_SPELLING_TXT = "✏️ Admin provided correct spelling: <code>{correct_spelling}</code>\n\nPlease request again with correct spelling."
-CUSTOM_REPLY_TXT = "💬 Admin replied to your request:\n\n{custom_message}"
+WRONG_SPELLING_TXT = "📌 Requested – <code>{requested_name}</code>\n\n✏️ Admin provided correct spelling: <code>{correct_spelling}</code>\n\nPlease request again with correct spelling."
+CUSTOM_REPLY_TXT = "📌 Requested – <code>{requested_name}</code>\n\n💬 Admin replied:\n{custom_message}"
 
 # ── Movie Update Notification ───────────────────────────────────────────────
 MOVIE_UPDATE_NOTIFY_TXT = """<b>{tag} ➤ {filename}</b>
@@ -265,3 +260,110 @@ BIN_USER_INFO_TXT = """📥 <b>Fast download link generated</b>
 📁 <b>File:</b> <code>{file_name}</code>
 🆔 <b>User ID:</b> <code>{user_id}</code>
 👤 <b>User:</b> {user_link}"""
+
+
+# ── Link guard ───────────────────────────────────────────────────────────────
+LINK_NOT_ALLOWED_TXT = "🚫 {mention}, sending link is not allowed."
+
+# ── Autofilter on/off ────────────────────────────────────────────────────────
+MAINTENANCE_TXT = "🛠 <b>Bot is under maintenance.</b>\n\nPlease try again later."
+AUTOFILTER_INFO_TXT = "Turn the autofilter ON or OFF. While it is OFF the bot doesn't search and replies that it is under maintenance."
+EMPTY_QUERY_TXT = "❌ Please send a movie / series name to search."
+
+# ── Filter words ─────────────────────────────────────────────────────────────
+FILTERWORDS_LIST_TXT = "🚫 <b>Filter words</b> ({count})\n\nThese words are ignored in every search:\n\n{words}"
+FILTERWORDS_EMPTY_TXT = "ℹ️ No filter words are set."
+SET_FILTERWORD_USAGE = (
+    "Usage: <code>/set_filterword word1, word2, some phrase</code>\n\n"
+    "Separate multiple words / phrases with a comma. They are removed from every search query."
+)
+SET_FILTERWORD_OK = (
+    "✅ <b>Filter words updated</b>\n\n"
+    "➕ Added: {added}\n"
+    "↔️ Already set: {existing}\n\n"
+    "Total: <b>{total}</b>"
+)
+REMOVE_FILTERWORD_USAGE = (
+    "Usage: <code>/remove_filterword word1, some phrase</code>\n\n"
+    "Separate multiple words / phrases with a comma. See all with /filterwords."
+)
+REMOVE_FILTERWORD_OK = (
+    "✅ <b>Filter words updated</b>\n\n"
+    "🗑 Removed: {removed}\n"
+    "❓ Not found: {missing}\n\n"
+    "Total: <b>{total}</b>"
+)
+
+# ── /trending ────────────────────────────────────────────────────────────────
+TRENDING_HEADER_TXT = "🔥 <b>Trending Searches</b>\n\nMost searched titles — tap one to get its files:"
+TRENDING_EMPTY_TXT = "🔥 No trending searches yet. Search for something first!"
+TRENDING_NOT_IN_DB_TXT = "❌ {title} isn't in the database anymore."
+
+# ── PM filter (admin switch in /settings) ──────────────────────────────────────
+PM_FILTER_INFO_TXT = "PM Filter ON: the bot searches movie names typed in its DM. OFF: it asks users to search in the movie group instead. Group search always stays ON."
+PM_SEARCH_OFF_TXT = (
+    "<b>👋 ʜᴇʏ {mention}!\n\n"
+    "🚫 ᴍᴏᴠɪᴇ sᴇᴀʀᴄʜ ɪɴ ʙᴏᴛ ᴘᴍ ɪs ᴛᴜʀɴᴇᴅ ᴏꜰꜰ.\n"
+    "🎬 ᴘʟᴇᴀsᴇ sᴇᴀʀᴄʜ ʏᴏᴜʀ ᴍᴏᴠɪᴇ ɪɴ ᴏᴜʀ ᴍᴏᴠɪᴇ ɢʀᴏᴜᴘ — ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ 👇</b>"
+)
+PM_SEARCH_OFF_BTN = "🎬 ᴍᴏᴠɪᴇ ɢʀᴏᴜᴘ"
+
+# ── Welcome message switch ─────────────────────────────────────────────────────
+WELCOME_INFO_TXT = "Welcome ON: when someone joins a group where I'm admin, I send the welcome video with their mention. OFF: no welcome message."
+
+# ── Premium page ───────────────────────────────────────────────────────────────
+PREMIUM_OWNER_BTN = "👤 ᴏᴡɴᴇʀ"
+PREMIUM_MYPLAN_BTN = "💎 ᴍʏ ᴘʟᴀɴ"
+PREMIUM_BACK_BTN = "⬅️ ʙᴀᴄᴋ"
+MYPLAN_ALERT_ACTIVE = "💎 Premium active\nExpires: {expiry}"
+MYPLAN_ALERT_NONE = "You don't have an active premium plan.\nTap Owner to buy one."
+
+# ── /telegraph ─────────────────────────────────────────────────────────────────
+TELEGRAPH_PROMPT_TXT = (
+    "📎 Send me a <b>photo or video</b> (reply to one with /telegraph, or send it now).\n"
+    "I'll give you a link + the Telegram <code>file_id</code>.\n\n"
+    "<i>Waiting 60 seconds…</i>"
+)
+TELEGRAPH_TIMEOUT_TXT = "⏳ Timed out. Send /telegraph again."
+TELEGRAPH_NOT_MEDIA_TXT = "❌ That's not a photo or video. Send /telegraph again."
+TELEGRAPH_TOO_BIG_TXT = "❌ File too big: <b>{size}</b> (max <b>{limit}</b> for the current provider)."
+TELEGRAPH_DOWNLOADING_TXT = "⬇️ Downloading…"
+TELEGRAPH_UPLOADING_TXT = "⬆️ Uploading…"
+TELEGRAPH_FAILED_TXT = "❌ Upload failed on every provider.\n<code>{error}</code>"
+TELEGRAPH_DONE_TXT = (
+    "✅ <b>Link ready</b>\n\n"
+    "🔗 <code>{url}</code>\n"
+    "🌐 Host: <code>{host}</code>\n\n"
+    "🆔 <b>file_id</b> (use for WELCOME_VIDEO / PREMIUM_PHOTO):\n<code>{file_id}</code>\n\n"
+    "Paste the link or file_id into <code>config.py</code>."
+)
+
+# ── Premium page (shown by the "premium" button) ──────────────────────────────
+PREMIUM_TEXT = """<b><i><blockquote>ᴀᴠᴀɪʟᴀʙʟᴇ ᴘʟᴀɴs  ♻️</blockquote>
+
+• 𝟷 ᴡᴇᴇᴋ  -  ₹15
+• 𝟷 ᴍᴏɴᴛʜ  -  ₹50
+• 2 ᴍᴏɴᴛʜs  -  ₹80
+• 3 ᴍᴏɴᴛʜs  -  ₹100
+
+•─────•─────────•─────•
+<blockquote>ᴘʀᴇᴍɪᴜᴍ ꜰᴇᴀᴛᴜʀᴇs  🎁</blockquote>
+
+○ ɴᴏ ɴᴇᴇᴅ ᴛᴏ ᴠᴇʀɪꜰʏ
+○ ᴅɪʀᴇᴄᴛ ꜰɪʟᴇs   
+○ ᴀᴅ-ꜰʀᴇᴇ ᴇxᴘᴇʀɪᴇɴᴄᴇ 
+○ ʜɪɢʜ-sᴘᴇᴇᴅ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋ                         
+○ ᴍᴜʟᴛɪ-ᴘʟᴀʏᴇʀ sᴛʀᴇᴀᴍɪɴɢ ʟɪɴᴋs                           
+○ ᴜɴʟɪᴍɪᴛᴇᴅ ᴍᴏᴠɪᴇꜱ, ꜱᴇʀɪᴇꜱ & ᴀɴɪᴍᴇ                                                                         
+○ ꜰᴜʟʟ ᴀᴅᴍɪɴ sᴜᴘᴘᴏʀᴛ                              
+○ ʀᴇǫᴜᴇsᴛ ᴡɪʟʟ ʙᴇ ᴄᴏᴍᴘʟᴇᴛᴇᴅ ɪɴ 𝟷ʜ
+•─────•─────────•─────•
+
+
+✨ ᴜᴘɪ ɪᴅ - <code>navex69@axl</code>
+
+ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴀᴄᴛɪᴠᴇ ᴘʟᴀɴ  /myplan
+
+💢 ᴍᴜsᴛ sᴇɴᴅ sᴄʀᴇᴇɴsʜᴏᴛ ᴀꜰᴛᴇʀ ᴘᴀʏᴍᴇɴᴛ
+
+‼️ ᴀꜰᴛᴇʀ sᴇɴᴅɪɴɢ ᴀ sᴄʀᴇᴇɴsʜᴏᴛ ᴘʟᴇᴀsᴇ ɢɪᴠᴇ ᴍᴇ sᴏᴍᴇ ᴛɪᴍᴇ ᴛᴏ ᴀᴅᴅ ʏᴏᴜ ɪɴ ᴛʜᴇ ᴘʀᴇᴍɪᴜᴍ ᴠᴇʀsɪᴏɴ.</i></b>"""

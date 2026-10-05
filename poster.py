@@ -32,8 +32,10 @@ _CACHE_MAX_ENTRIES = 500
 _YEAR_RE = re.compile(r"\b(19[5-9]\d|20[0-3]\d)\b")
 _SE_RE = re.compile(r"\bS\d{1,2}(E\d{1,3})?\b", re.IGNORECASE)
 _NOISE_RE = re.compile(
-    r"\b(480p|720p|1080p|2160p|4k|uhd|hdr\d*|hdrip|bluray|bdrip|remux|"
-    r"web[\-\s]?dl|webrip|hdtv|dvdrip|dvdscr|cam|hdts|ts|"
+    r"\b(240p|360p|480p|576p|720p|1080p|1440p|2160p|4k|uhd|hdr\d*|"
+    r"hd[\-\s._]?(?:rip|tc|cam|ts)|hdrip|bluray|blu[\-\s]ray|bdrip|bd[\-\s]rip|brrip|remux|"
+    r"web[\-\s._]?dl|web[\-\s._]?rip|hdtv|dvd[\-\s]?rip|dvd[\-\s]?scr|pre[\-\s]?dvd|"
+    r"camrip|telesync|cam|hdts|ts|hd|"
     r"x264|x265|hevc|avc|aac|ac3|dts|ddp\d?\.?\d?|flac|mp3|"
     r"esub|esubs|subs?|subbed|dubbed|dual audio|multi audio|dual|multi|"
     r"hindi|english|tamil|telugu|kannada|malayalam|bengali|punjabi|marathi|"

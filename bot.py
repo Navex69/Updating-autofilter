@@ -20,6 +20,7 @@ from log_utils import schedule_restart_notice
 from utils import temp
 from web import web_app
 from fastdl.pool import pool as stream_pool
+import styled_buttons
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,15 +29,18 @@ logging.basicConfig(
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
+styled_buttons.install(BOT_TOKEN)  # blue/green/red button colours (no-op if BUTTON_COLORS=false)
+
 USER_COMMANDS = [
     BotCommand("start", "Start the bot"),
-    BotCommand("help", "How search works"),
+    BotCommand("trending", "Most searched titles"),
     BotCommand("myplan", "Check your premium status"),
     BotCommand("req", "Request a file"),
 ]
 ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand("admin", "Admin commands panel"),
     BotCommand("settings", "Admin settings panel"),
+    BotCommand("telegraph", "Get a link for a photo/video"),
 ]
 
 

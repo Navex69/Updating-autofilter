@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+import unicodedata
 from pymongo import ASCENDING
 from pymongo.errors import DuplicateKeyError
 from config import COLLECTION_NAME
@@ -273,6 +274,91 @@ def _quality_rank(text: str) -> int:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# RESOLUTION / SOURCE TAGS used by SEARCH (480p, 720p, 1080p ... and WEB-DL,
+# HDRip, HDTC, HD ...). They are two separate, independent tags, so
+# "1080p WEB-DL" means "1080p AND WEB-DL" — a file named "... 1080p WEB-DL"
+# matches both. (The single Quality filter button above is unchanged.)
+# Every pattern accepts each separator seen in real file names:
+# "web dl", "web-dl", "web.dl", "web_dl", "webdl".
+# ══════════════════════════════════════════════════════════════════════════════
+
+_SEP = r"[\s\-._]?"
+
+# (code, regex)
+_RESOLUTION_RULES = [
+    ("2160p", r"2160p|4k|uhd"),
+    ("1440p", r"1440p"),
+    ("1080p", r"1080p"),
+    ("720p", r"720p"),
+    ("576p", r"576p"),
+    ("480p", r"480p"),
+    ("360p", r"360p"),
+    ("240p", r"240p"),
+]
+
+# (code, regex, word-index token alternatives). Specific tags come first and
+# plain "hd" last, so "hd rip" is read as HDRip and never as "hd" + "rip".
+_SOURCE_RULES = [
+    ("webdl", rf"web{_SEP}dl", [["webdl"], ["web", "dl"]]),
+    ("webrip", rf"web{_SEP}rip", [["webrip"], ["web", "rip"]]),
+    ("bluray", rf"blu{_SEP}ray|bd{_SEP}rip|br{_SEP}rip",
+     [["bluray"], ["blu", "ray"], ["bdrip"], ["bd", "rip"], ["brrip"], ["br", "rip"]]),
+    ("hdrip", rf"hd{_SEP}rip", [["hdrip"], ["hd", "rip"]]),
+    ("hdtv", r"hdtv", [["hdtv"]]),
+    ("hdtc", rf"hd{_SEP}tc", [["hdtc"], ["hd", "tc"]]),
+    ("hdcam", rf"hd{_SEP}cam", [["hdcam"], ["hd", "cam"]]),
+    ("dvdrip", rf"dvd{_SEP}rip", [["dvdrip"], ["dvd", "rip"]]),
+    ("dvdscr", rf"dvd{_SEP}scr", [["dvdscr"], ["dvd", "scr"]]),
+    ("predvd", rf"pre{_SEP}dvd", [["predvd"], ["pre", "dvd"]]),
+    ("ts", rf"hd{_SEP}ts|ts|telesync", [["hdts"], ["hd", "ts"], ["ts"], ["telesync"]]),
+    ("cam", rf"cam(?:{_SEP}rip)?", [["cam"], ["camrip"], ["cam", "rip"]]),
+    ("hd", rf"hd(?!{_SEP}(?:rip|tc|cam|ts)\b)", [["hd"]]),
+]
+
+_RES_TEXT_PATTERNS = {
+    code: re.compile(rf"\b(?:{pat})\b", re.IGNORECASE) for code, pat in _RESOLUTION_RULES
+}
+_RES_FULL_PATTERNS = {
+    code: re.compile(pat, re.IGNORECASE) for code, pat in _RESOLUTION_RULES
+}
+_SOURCE_TEXT_PATTERNS = {
+    code: re.compile(rf"\b(?:{pat})\b", re.IGNORECASE) for code, pat, _t in _SOURCE_RULES
+}
+_SOURCE_FULL_PATTERNS = {
+    code: re.compile(pat, re.IGNORECASE) for code, pat, _t in _SOURCE_RULES
+}
+_SOURCE_TOKENS = {code: tokens for code, _pat, tokens in _SOURCE_RULES}
+
+
+def _resolution_code_of(tag: str):
+    tag = tag.strip()
+    for code, _pat in _RESOLUTION_RULES:
+        if _RES_FULL_PATTERNS[code].fullmatch(tag):
+            return code
+    return None
+
+
+def _source_code_of(tag: str):
+    tag = tag.strip()
+    for code, _pat, _tokens in _SOURCE_RULES:
+        if _SOURCE_FULL_PATTERNS[code].fullmatch(tag):
+            return code
+    return None
+
+
+def _resolution_matches(text: str, codes) -> bool:
+    """True if the text carries ANY of the given resolution(s)."""
+    codes = [codes] if isinstance(codes, str) else list(codes)
+    return any(_RES_TEXT_PATTERNS[c].search(text) for c in codes if c in _RES_TEXT_PATTERNS)
+
+
+def _source_matches(text: str, codes) -> bool:
+    """True if the text carries EVERY given source tag."""
+    codes = [codes] if isinstance(codes, str) else list(codes)
+    return all(_SOURCE_TEXT_PATTERNS[c].search(text) for c in codes if c in _SOURCE_TEXT_PATTERNS)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # CLEAN TITLE — cuts everything from the first season/episode/year/quality/
 # language/technical-junk marker onward, since in real captions those tags
 # always come after the title, never before or in the middle. This is the
@@ -280,12 +366,86 @@ def _quality_rank(text: str) -> int:
 # "just the title" before Stage 1 compares them for an exact match.
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── emoji / symbol / empty-bracket removal ──────────────────────────────────
+# Used for everything shown to users (result page, trending list) and inside
+# clean_title(), so a caption like "🎬 Movie ✦ 2024 ★ [ ]" is understood as
+# plain "Movie 2024". Letters, digits, punctuation and every language's
+# script are never touched. Removed: emojis (flags, skin tones, joined
+# emojis, keycaps), decorative symbols (★ ✦ ➤ ● ◆ ♥ © ® ™ → | ~ • « » ...)
+# and empty brackets ([] () {}). The zero-width joiner is only removed when
+# it glues emojis together, so Indic scripts that use it stay intact.
+
+def _build_decor_class() -> str:
+    keep = set("°´")
+    spans = []
+
+    # every "Symbol, other/modifier" code point outside the letter scripts
+    # (Greek ... Indic ... Tibetan, U+0370-U+1FFF, are skipped entirely)
+    for cp in list(range(0x80, 0x370)) + list(range(0x2000, 0x20000)):
+        ch = chr(cp)
+        if ch not in keep and unicodedata.category(ch) in ("So", "Sk"):
+            spans.append((cp, cp))
+    # wholesale emoji / symbol blocks (also covers emojis newer than this
+    # Python's Unicode database)
+    spans.extend([
+        (0x1F000, 0x1FAFF), (0x2600, 0x27BF), (0x2B00, 0x2BFF),
+        (0x2190, 0x21FF), (0x27F0, 0x27FF), (0x2900, 0x297F),
+        (0xFE0E, 0xFE0F), (0x20E3, 0x20E3), (0xE0020, 0xE007F),
+        (0x203C, 0x203C), (0x2049, 0x2049), (0x2139, 0x2139),
+        (0x3030, 0x3030), (0x303D, 0x303D),
+    ])
+    for ch in "|~•‣⁃∙·«»‹›※¦":
+        spans.append((ord(ch), ord(ch)))
+
+    spans.sort()
+    merged = []
+    for lo, hi in spans:
+        if merged and lo <= merged[-1][1] + 1:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+
+    def esc(cp):
+        return "\\u%04X" % cp if cp <= 0xFFFF else "\\U%08X" % cp
+
+    return "[" + "".join(
+        esc(lo) if lo == hi else f"{esc(lo)}-{esc(hi)}" for lo, hi in merged
+    ) + "]"
+
+
+_DECOR_CLASS = _build_decor_class()
+_KEYCAP_RE = re.compile(r"[0-9#*]\uFE0F?\u20E3")
+_DECOR_RUN_RE = re.compile(_DECOR_CLASS + r"(?:\u200D?" + _DECOR_CLASS + r")*\u200D?")
+_EMPTY_BRACKETS_RE = re.compile(r"\[\s*\]|\(\s*\)|\{\s*\}")
+_EDGE_JUNK = " \t-–—:,;"
+
+
+def clean_display_text(text: str) -> str:
+    """Remove emojis, decorative symbols and empty brackets; keep the rest of
+    the text exactly as it is (only the gaps left behind are tidied)."""
+    if not text:
+        return ""
+    cleaned, n1 = _KEYCAP_RE.subn(" ", text)
+    cleaned, n2 = _DECOR_RUN_RE.subn(" ", cleaned)
+    n3 = 0
+    while True:  # nested leftovers such as "([ ])" collapse step by step
+        cleaned, n = _EMPTY_BRACKETS_RE.subn(" ", cleaned)
+        if not n:
+            break
+        n3 += n
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    if n1 or n2 or n3:
+        cleaned = cleaned.strip(_EDGE_JUNK)
+    return cleaned
+
+
 _HTML_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?>")
 _JUNK_RE = re.compile(
     r"\b(s\d{1,2}e?\d{0,3}|season\s*\d+|ep(?:isode)?\.?\s*\d+|\d{3,4}p|4k|uhd|hdr\d*|"
     r"bluray|bdrip|remux|web-?dl|webrip|hdrip|dvdrip|hdtv|cam|hdts|ts|"
     r"hevc|x264|x265|avc|av1|aac|ddp\d?\.?\d?|dts|flac|mp3|ac3|"
     r"esubs?|subs?|subbed|dubbed|dual\s*audio|multi\s*audio|dual|multi|"
+    + "|".join(pat for _code, pat, _tokens in _SOURCE_RULES) + "|"
     + "|".join(re.escape(a) for aliases in _LANGUAGE_ALIASES.values() for a in aliases)
     + r")\b.*",
     re.IGNORECASE,
@@ -300,6 +460,7 @@ def clean_title(text: str) -> str:
     # strip that first, or a formatted caption's title never matches an
     # unformatted query, which used to make Stage 1 miss almost everything.
     t = _HTML_TAG_RE.sub(" ", text)
+    t = clean_display_text(t)
     t = _YEAR_PATTERN.sub(" ", t)
     t = _JUNK_RE.sub(" ", t)
     t = _TITLE_PUNCT_RE.sub(" ", t)
@@ -351,6 +512,8 @@ def apply_filters(results: list, filters: dict) -> list:
     year = filters.get("year")
     quality = filters.get("quality")
     language = filters.get("language")
+    resolution = filters.get("resolution")
+    source = filters.get("source")
 
     out = []
     for doc in results:
@@ -364,6 +527,10 @@ def apply_filters(results: list, filters: dict) -> list:
         if quality and _quality_of(text)[0] != quality:
             continue
         if language and not _language_matches(text, language):
+            continue
+        if resolution and not _resolution_matches(text, resolution):
+            continue
+        if source and not _source_matches(text, source):
             continue
         out.append(doc)
     return out
@@ -395,9 +562,14 @@ _TRAILING_EPISODE_RE = re.compile(
     r"^(?P<title>.*\S)\s+(?:Episode|Ep)\.?\s*(?P<episode>\d{1,3})\s*$", re.IGNORECASE,
 )
 _TRAILING_YEAR_RE = re.compile(r"^(?P<title>.*\S)\s+(?P<year>19[5-9]\d|20[0-3]\d)\s*$")
-_TRAILING_QUALITY_RE = re.compile(
-    r"^(?P<title>.*\S)\s+(?P<quality>2160p|4k|uhd|1080p|720p|480p|360p|"
-    r"blu-?ray|bdrip|web-?dl|webrip|hdrip|hdtv|dvdrip|cam|hdts|ts)\s*$",
+_TRAILING_RESOLUTION_RE = re.compile(
+    r"^(?P<title>.*\S)\s+(?P<resolution>"
+    + "|".join(pat for _code, pat in _RESOLUTION_RULES) + r")\s*$",
+    re.IGNORECASE,
+)
+_TRAILING_SOURCE_RE = re.compile(
+    r"^(?P<title>.*\S)\s+(?P<source>"
+    + "|".join(pat for _code, pat, _tokens in _SOURCE_RULES) + r")\s*$",
     re.IGNORECASE,
 )
 _ALL_LANG_ALIASES = sorted(
@@ -414,7 +586,8 @@ _TRAILING_PATTERNS = [
     ("season", _TRAILING_SEASON_RE),
     ("episode", _TRAILING_EPISODE_RE),
     ("year", _TRAILING_YEAR_RE),
-    ("quality", _TRAILING_QUALITY_RE),
+    ("resolution", _TRAILING_RESOLUTION_RE),
+    ("source", _TRAILING_SOURCE_RE),
     ("language", _TRAILING_LANG_RE),
 ]
 
@@ -427,9 +600,12 @@ def parse_query(query: str) -> tuple:
     whichever of season/episode/year/quality/language were found trailing
     it. Never strips a query down to nothing — a query that IS just "1917"
     stays a title, not a year.
+    `resolution` (480p/720p/1080p/...) and `source` (WEB-DL/HDRip/HDTC/HD/...)
+    come back as lists of codes (or None).
     """
-    title = query.strip()
-    tags = {"season": None, "episode": None, "year": None, "quality": None, "language": None}
+    title = re.sub(r"\s+", " ", query.strip())
+    tags = {"season": None, "episode": None, "year": None, "language": None,
+            "resolution": None, "source": None}
     if not title:
         return title, tags
 
@@ -454,9 +630,14 @@ def parse_query(query: str) -> tuple:
                 tags["episode"] = tags["episode"] if tags["episode"] is not None else int(m.group("episode"))
             elif kind == "year":
                 tags["year"] = tags["year"] or m.group("year")
-            elif kind == "quality":
-                code, _label = _quality_of(m.group("quality"))
-                tags["quality"] = tags["quality"] or code
+            elif kind == "resolution":
+                code = _resolution_code_of(m.group("resolution"))
+                if code and code not in (tags["resolution"] or []):
+                    tags["resolution"] = (tags["resolution"] or []) + [code]
+            elif kind == "source":
+                code = _source_code_of(m.group("source"))
+                if code and code not in (tags["source"] or []):
+                    tags["source"] = (tags["source"] or []) + [code]
             elif kind == "language":
                 langs = _languages_of(m.group("lang"))
                 if langs and not tags["language"]:
@@ -467,6 +648,105 @@ def parse_query(query: str) -> tuple:
             break  # restart the pattern list against the now-shorter title
 
     return title, tags
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAG-ONLY QUERIES — e.g. "Hindi", "2024", "Hindi 2024", "1080p", "Hindi 2024
+# 720p WEB-DL". There is no title in such a query, so the exact-title search
+# below has nothing to compare and used to return nothing. Here the tags ARE
+# the search: every file whose name/caption carries all of them is returned.
+# Only queries made up purely of language / year / resolution / source tags
+# are treated this way — anything else goes through the normal title search
+# exactly as before.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def parse_tag_only_query(query: str):
+    """Return {"languages", "year", "resolution", "source"} if the query
+    consists ONLY of tags, else None. languages/resolution/source are lists
+    of codes (maybe empty), year is a string or None."""
+    text = re.sub(r"\s+", " ", (query or "").lower()).strip()
+    if not text:
+        return None
+
+    sources, resolutions, languages = [], [], []
+    for code, _pat, _tokens in _SOURCE_RULES:
+        text, n = _SOURCE_TEXT_PATTERNS[code].subn(" ", text)
+        if n:
+            sources.append(code)
+    for code, _pat in _RESOLUTION_RULES:
+        text, n = _RES_TEXT_PATTERNS[code].subn(" ", text)
+        if n:
+            resolutions.append(code)
+    for canonical, pat in _LANG_ALIAS_PATTERNS.items():
+        text, n = pat.subn(" ", text)
+        if n:
+            languages.append(canonical)
+    years = set(_YEAR_PATTERN.findall(text))
+    text = _YEAR_PATTERN.sub(" ", text)
+
+    if _tokenize(text):
+        return None  # a real title word is present — not a tag-only query
+    if len(years) > 1:
+        return None  # two different years — ambiguous, leave to normal flow
+    year = next(iter(years), None)
+    if not (sources or resolutions or languages or year):
+        return None
+    return {"languages": languages, "year": year, "resolution": resolutions, "source": sources}
+
+
+def is_language_year_query(query: str) -> bool:
+    """True for a query that is only language / year / resolution / quality tags."""
+    return parse_tag_only_query(query) is not None
+
+
+async def _search_by_tags(query: str) -> list:
+    parsed = parse_tag_only_query(query)
+    if not parsed:
+        return []
+    languages, year = parsed["languages"], parsed["year"]
+    resolutions, sources = parsed["resolution"], parsed["source"]
+
+    # The `words` index narrows the candidates; the same regex helpers the
+    # filter buttons use then make the final decision, so results here always
+    # agree with them.
+    conditions = []
+    if year:
+        conditions.append({"words": year})
+    for language in languages:
+        tokens = [a for a in _LANGUAGE_ALIASES[language] if " " not in a]
+        conditions.append({"words": {"$in": tokens}})
+    if resolutions:
+        tokens = []
+        for code, pat in _RESOLUTION_RULES:
+            if code in resolutions:
+                tokens.extend(_tokenize(pat.replace("|", " ")))
+        conditions.append({"words": {"$in": sorted(set(tokens))}})
+    for code in sources:
+        alternatives = [
+            {"words": alt[0]} if len(alt) == 1 else {"words": {"$all": alt}}
+            for alt in _SOURCE_TOKENS[code]
+        ]
+        conditions.append(alternatives[0] if len(alternatives) == 1 else {"$or": alternatives})
+    mongo_query = conditions[0] if len(conditions) == 1 else {"$and": conditions}
+
+    cursor = files.find(mongo_query, _RESULT_FIELDS).limit(_CANDIDATE_FETCH)
+    candidates = await cursor.to_list(length=_CANDIDATE_FETCH)
+
+    results = []
+    for doc in candidates:
+        text = _doc_text(doc)
+        if year and _year_of(text) != year:
+            continue
+        if not all(_language_matches(text, language) for language in languages):
+            continue
+        if resolutions and not _resolution_matches(text, resolutions):
+            continue
+        if sources and not _source_matches(text, sources):
+            continue
+        results.append(doc)
+
+    results.sort(key=lambda d: -_quality_rank(_doc_text(d)))
+    return results[:_MAX_FETCH]
 
 
 async def search_files(query: str) -> list:
@@ -494,7 +774,9 @@ async def search_files(query: str) -> list:
     title, tags = parse_query(query)
     query_key = clean_title(title).lower()
     if not query_key:
-        return []
+        # No title left to match — if the query is just tags (language, year,
+        # resolution, quality), search by those instead of returning nothing.
+        return await _search_by_tags(query)
 
     words = _tokenize(query_key)
     if not words:
