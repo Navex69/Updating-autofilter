@@ -17,10 +17,9 @@ from database.settings_db import get_settings
 from log_utils import register_user
 from plugins.deliver import deliver_file
 from plugins.verify import handle_notcopy
-from Script import script
 from utils import IST, temp
 from strings import (
-    HELP_TXT,
+    START_TXT, PREMIUM_TEXT, HELP_TXT,
     MYPLAN_ACTIVE_TXT, MYPLAN_NONE_TXT,
     PREMIUM_OWNER_BTN, PREMIUM_MYPLAN_BTN, PREMIUM_BACK_BTN,
     MYPLAN_ALERT_ACTIVE, MYPLAN_ALERT_NONE,
@@ -114,7 +113,7 @@ async def _swap_message(bot, query, text, markup, *, photo=None, video=None):
 
 
 def _start_text(user) -> str:
-    return script.START_TXT.format(user.mention if user else "there")
+    return START_TXT.format(mention=user.mention if user else "there")
 
 
 async def send_start(message):
@@ -244,7 +243,7 @@ async def welcome_new_members(bot, message):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Premium page (callback "premium") — photo + Script.PREMIUM_TEXT + Owner / Back
+# Premium page (callback "premium") — photo + PREMIUM_TEXT (strings.py) + Owner / Back
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _premium_markup() -> InlineKeyboardMarkup:
@@ -257,7 +256,7 @@ def _premium_markup() -> InlineKeyboardMarkup:
 @Client.on_callback_query(filters.regex(r"^premium$"))
 async def premium_page(bot, query):
     await query.answer()
-    await _swap_message(bot, query, script.PREMIUM_TEXT, _premium_markup(), photo=PREMIUM_PHOTO or None)
+    await _swap_message(bot, query, PREMIUM_TEXT, _premium_markup(), photo=PREMIUM_PHOTO or None)
 
 
 @Client.on_callback_query(filters.regex(r"^start_back$"))
