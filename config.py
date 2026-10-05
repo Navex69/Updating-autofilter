@@ -83,10 +83,10 @@ START_BUTTONS = [
 # Link buttons only (same tuple format) — callback buttons are PM-only.
 WELCOME_BUTTONS = [
     [("⇆ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘs ⇆", "url", "http://t.me/{bot}?startgroup=start")],
-    [
-        ("• Movie Group", "url", "https://t.me/Navex_Movies"),
-        ("• Bot PM", "url", "http://t.me/{bot}?start=start"),
-    ],
+ #   [
+ #       ("• Movie Group", "url", "https://t.me/Navex_Movies"),
+ #       ("• Bot PM", "url", "http://t.me/{bot}?start=start"),
+ #   ],
 ]
 
 # Text sent with the video when someone JOINS a group. {mention} = the new
